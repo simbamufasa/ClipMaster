@@ -8,6 +8,7 @@ namespace ClipMaster;
 public partial class App : Application
 {
     private NotifyIcon?      _tray;
+    private TrayMenu?        _trayMenu;
     private MainWindow?      _window;
     private readonly DataService      _data   = new();
     private readonly ClipboardMonitor _clip   = new();
@@ -81,15 +82,17 @@ public partial class App : Application
             Visible = true,
         };
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Show ClipMaster", null, (_, _) => ToggleWindow());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Quit", null, (_, _) => Quit());
-        _tray.ContextMenuStrip = menu;
+        // Custom WPF tray menu (no WinForms ContextMenuStrip)
+        _trayMenu = new TrayMenu();
+        _trayMenu.ShowRequested += ToggleWindow;
+        _trayMenu.QuitRequested += Quit;
 
         _tray.MouseClick += (_, args) =>
         {
-            if (args.Button == MouseButtons.Left) ToggleWindow();
+            if (args.Button == MouseButtons.Left)
+                Dispatcher.Invoke(ToggleWindow);
+            else if (args.Button == MouseButtons.Right)
+                Dispatcher.Invoke(() => _trayMenu.ShowNearTray());
         };
     }
 
