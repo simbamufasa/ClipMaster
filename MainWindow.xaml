@@ -129,6 +129,7 @@
 
     <!-- Toast overlay -->
     <Border x:Name="ToastBorder"
+            Grid.RowSpan="6"
             Background="#333333" CornerRadius="6" Padding="14,7"
             HorizontalAlignment="Center" VerticalAlignment="Bottom"
             Margin="0,0,0,16" Opacity="0" IsHitTestVisible="False">
