@@ -10,13 +10,7 @@ public class DataService
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster");
     private static readonly string DataFile = Path.Combine(DataDir, "data.json");
 
-    private static readonly Regex[] PasswordPatterns =
-    [
-        new(@"^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':""\\|,.<>\/?]).{8,}$"),
-        new(@"^[A-Za-z0-9+/]{20,}={0,2}$"),
-        new(@"(?:password|passwd|pwd|secret|token|key|auth)[\s:=]+\S+", RegexOptions.IgnoreCase),
-        new(@"^[0-9a-f]{32,}$", RegexOptions.IgnoreCase),
-    ];
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
@@ -34,15 +28,42 @@ public class DataService
 
     public void Save(AppData data)
     {
-        try { File.WriteAllText(DataFile, JsonSerializer.Serialize(data, JsonOpts)); }
+        try
+        {
+            Directory.CreateDirectory(DataDir);
+            var tmp = DataFile + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(data, JsonOpts));
+            File.Move(tmp, DataFile, overwrite: true);
+        }
         catch { /* disk full or locked */ }
     }
 
-    public bool LooksLikePassword(string text)
+    public static bool LooksLikePassword(string text)
     {
         if (string.IsNullOrEmpty(text) || text.Length < 8 || text.Length > 512) return false;
         if (text.Contains('\n') || text.Contains(' ')) return false;
-        return PasswordPatterns.Any(p => p.IsMatch(text.Trim()));
+        var t = text.Trim();
+        bool hasUpper = false, hasLower = false, hasDigit = false, hasSymbol = false;
+        foreach (var c in t)
+        {
+            if (char.IsUpper(c))      hasUpper = true;
+            else if (char.IsLower(c)) hasLower = true;
+            else if (char.IsDigit(c)) hasDigit = true;
+            else                      hasSymbol = true;
+        }
+        if (t.Length >= 8 && hasUpper && hasLower && hasDigit && hasSymbol) return true;
+        if (Regex.IsMatch(t, @"^[A-Za-z0-9+/]{20,}={0,2}$")) return true;
+        if (Regex.IsMatch(t, @"(?:password|passwd|pwd|secret|token|key|auth)[\s:=]+\S+", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(t, @"^[0-9a-f]{32,}$", RegexOptions.IgnoreCase)) return true;
+        return false;
+    }
+
+    private static RegexOptions ParseFlags(string flags)
+    {
+        var opts = RegexOptions.None;
+        if (flags.Contains('i')) opts |= RegexOptions.IgnoreCase;
+        if (flags.Contains('m')) opts |= RegexOptions.Multiline;
+        return opts;
     }
 
     public (string Text, List<string> Applied) ApplyAutoRules(string text, List<Rule> rules)
@@ -53,24 +74,25 @@ public class DataService
         {
             try
             {
-                var opts = RegexOptions.None;
-                if (rule.Flags.Contains('i')) opts |= RegexOptions.IgnoreCase;
-                if (rule.Flags.Contains('m')) opts |= RegexOptions.Multiline;
-                var rx   = new Regex(rule.Pattern, opts);
-                var next = rx.Replace(result, rule.Replacement ?? "");
+                var rx   = new Regex(rule.Pattern, ParseFlags(rule.Flags), RegexTimeout);
+                var count = rule.Flags.Contains('g') ? -1 : 1;
+                var next = count == -1
+                    ? rx.Replace(result, rule.Replacement ?? "")
+                    : rx.Replace(result, rule.Replacement ?? "", count);
                 if (next != result) { applied.Add(rule.Name); result = next; }
             }
-            catch { /* invalid regex — skip */ }
+            catch { /* invalid regex or timeout — skip */ }
         }
         return (result, applied);
     }
 
     public string ApplyRule(string text, Rule rule)
     {
-        var opts = RegexOptions.None;
-        if (rule.Flags.Contains('i')) opts |= RegexOptions.IgnoreCase;
-        if (rule.Flags.Contains('m')) opts |= RegexOptions.Multiline;
-        return new Regex(rule.Pattern, opts).Replace(text, rule.Replacement ?? "");
+        var rx    = new Regex(rule.Pattern, ParseFlags(rule.Flags), RegexTimeout);
+        var count = rule.Flags.Contains('g') ? -1 : 1;
+        return count == -1
+            ? rx.Replace(text, rule.Replacement ?? "")
+            : rx.Replace(text, rule.Replacement ?? "", count);
     }
 
     public (string FinalText, bool WasTransformed) AddClip(AppData data, string rawText)
@@ -89,6 +111,7 @@ public class DataService
             data.Clips.RemoveAt(existing);
             clip.CopiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             clip.CopyCount++;
+            clip.Text = finalText;
             if (applied.Count > 0) clip.AppliedRules = applied;
             data.Clips.Insert(0, clip);
         }

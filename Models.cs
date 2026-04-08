@@ -34,6 +34,7 @@ public class AppSettings
     [JsonPropertyName("autoApplyRules")] public bool   AutoApplyRules { get; set; } = true;
     [JsonPropertyName("windowWidth")]    public int    WindowWidth    { get; set; } = 480;
     [JsonPropertyName("windowHeight")]   public int    WindowHeight   { get; set; } = 640;
+    [JsonPropertyName("runOnStartup")]   public bool   RunOnStartup   { get; set; }
 }
 
 public class AppData

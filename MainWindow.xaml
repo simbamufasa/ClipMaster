@@ -14,6 +14,12 @@
         SizeChanged="Window_SizeChanged"
         KeyDown="Window_KeyDown">
 
+  <WindowChrome.WindowChrome>
+    <WindowChrome CaptionHeight="0"
+                  ResizeBorderThickness="5"
+                  GlassFrameThickness="0"/>
+  </WindowChrome.WindowChrome>
+
   <Grid>
     <Grid.RowDefinitions>
       <RowDefinition Height="36"/>   <!-- Title bar -->

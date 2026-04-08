@@ -93,7 +93,9 @@ public class HotkeyService : IDisposable
 
     public void Dispose()
     {
+        if (_source == null) return;
         UnregisterHotKey(_hwnd, HOTKEY_ID);
-        _source?.RemoveHook(WndProc);
+        _source.RemoveHook(WndProc);
+        _source = null;
     }
 }
