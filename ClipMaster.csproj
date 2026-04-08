@@ -9,6 +9,8 @@
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <AssemblyName>ClipMaster</AssemblyName>
     <RootNamespace>ClipMaster</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\icon.ico" />
