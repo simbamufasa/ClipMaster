@@ -239,6 +239,9 @@ public partial class MainWindow : Window
         return $"{h / 24}d ago";
     }
 
+    private static WpfFontFamily AppFont  => new("Segoe UI Variable, Segoe UI, sans-serif");
+    private static WpfFontFamily MonoFont => new("Cascadia Code, Consolas, monospace");
+
     private UIElement BuildClipCard(ClipEntry clip, int rank)
     {
         double opacity = rank switch { 1 => 1.0, 2 => 0.85, 3 => 0.70, _ => 0.55 };
@@ -314,12 +317,14 @@ public partial class MainWindow : Window
         {
             Text         = clip.IsSensitive ? "••••••••" : displayText,
             FontSize     = 12,
+            FontFamily   = AppFont,
             Foreground   = (WpfBrush)FindResource("Text1Brush"),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxHeight    = 72,
             Opacity      = opacity,
-            Margin       = new Thickness(0, 0, 0, 6),
+            Margin       = new Thickness(0, 2, 0, 8),
             TextWrapping = TextWrapping.Wrap,
+            LineHeight   = 18,
         };
         if (clip.IsSensitive)
         {
@@ -395,6 +400,10 @@ public partial class MainWindow : Window
             Child   = cardContent,
         };
 
+        // Card hover effect
+        card.MouseEnter += (_, _) => card.Background = BrushFromHex("#282828");
+        card.MouseLeave += (_, _) => card.Background = (WpfBrush)FindResource("SurfaceBrush");
+
         // Double-click on card body (not buttons) → paste and promote
         card.MouseLeftButtonDown += (_, e) =>
         {
@@ -429,10 +438,17 @@ public partial class MainWindow : Window
         new()
         {
             Background   = BrushFromHex(bgHex),
-            CornerRadius = new CornerRadius(3),
-            Padding      = new Thickness(4, 1, 4, 1),
-            Margin       = new Thickness(0, 0, 3, 0),
-            Child        = new TextBlock { Text = text, FontSize = 9, Foreground = BrushFromHex(fgHex) },
+            CornerRadius = new CornerRadius(8),
+            Padding      = new Thickness(7, 2, 7, 2),
+            Margin       = new Thickness(0, 0, 4, 0),
+            Child        = new TextBlock
+            {
+                Text       = text,
+                FontSize   = 9,
+                FontFamily = new WpfFontFamily("Segoe UI Variable, Segoe UI"),
+                FontWeight = FontWeights.Medium,
+                Foreground = BrushFromHex(fgHex),
+            },
         };
 
     private WpfButton CardBtn(string label, string styleKey) =>
@@ -446,6 +462,21 @@ public partial class MainWindow : Window
 
     private static SolidColorBrush BrushFromHex(string hex) =>
         (SolidColorBrush)new BrushConverter().ConvertFrom(hex)!;
+
+    private WpfTextBox StyledInput(string text, double width = 160) =>
+        new()
+        {
+            Text            = text,
+            Width           = width,
+            FontSize        = 12,
+            FontFamily      = AppFont,
+            Padding         = new Thickness(8, 5, 8, 5),
+            Background      = (WpfBrush)FindResource("SurfaceBrush"),
+            Foreground      = (WpfBrush)FindResource("Text1Brush"),
+            BorderBrush     = (WpfBrush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CaretBrush      = (WpfBrush)FindResource("AccentBrush"),
+        };
 
     // ── Toast ───────────────────────────────────────────────────────────────
 
@@ -507,9 +538,9 @@ public partial class MainWindow : Window
         {
             Text         = $"/{rule.Pattern}/{rule.Flags}  →  {(string.IsNullOrEmpty(rule.Replacement) ? "(delete)" : rule.Replacement)}",
             FontSize     = 11,
-            FontFamily   = new WpfFontFamily("Consolas"),
+            FontFamily   = MonoFont,
             Foreground   = (WpfBrush)FindResource("Text2Brush"),
-            Margin       = new Thickness(0, 0, 0, 6),
+            Margin       = new Thickness(0, 2, 0, 8),
             TextWrapping = TextWrapping.Wrap,
         };
 
@@ -563,12 +594,12 @@ public partial class MainWindow : Window
 
         return new Border
         {
-            Background    = BrushFromHex("#1e1e1e"),
-            BorderBrush   = (WpfBrush)FindResource("BorderBrush"),
+            Background      = (WpfBrush)FindResource("SurfaceBrush"),
+            BorderBrush     = (WpfBrush)FindResource("BorderSubtleBrush"),
             BorderThickness = new Thickness(1),
-            CornerRadius  = new CornerRadius(8),
-            Margin        = new Thickness(0, 0, 0, 6),
-            Child         = content,
+            CornerRadius    = new CornerRadius(10),
+            Margin          = new Thickness(0, 0, 0, 6),
+            Child           = content,
         };
     }
 
@@ -600,16 +631,17 @@ public partial class MainWindow : Window
             {
                 Text       = title,
                 FontSize   = 10,
+                FontFamily = AppFont,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = (WpfBrush)FindResource("Text3Brush"),
-                Margin     = new Thickness(0, 10, 0, 8),
+                Margin     = new Thickness(0, 14, 0, 8),
             });
         }
 
         void SettingRow(string label, string desc, UIElement control)
         {
-            var lbl  = new TextBlock { Text = label, FontSize = 13, Foreground = (WpfBrush)FindResource("Text1Brush") };
-            var dsc  = new TextBlock { Text = desc,  FontSize = 11, Foreground = (WpfBrush)FindResource("Text2Brush") };
+            var lbl  = new TextBlock { Text = label, FontSize = 13, FontFamily = AppFont, Foreground = (WpfBrush)FindResource("Text1Brush") };
+            var dsc  = new TextBlock { Text = desc,  FontSize = 11, FontFamily = AppFont, Foreground = (WpfBrush)FindResource("Text2Brush"), Margin = new Thickness(0, 2, 0, 0) };
             var left = new StackPanel();
             left.Children.Add(lbl);
             left.Children.Add(dsc);
@@ -623,20 +655,10 @@ public partial class MainWindow : Window
         // General
         SectionHeader("GENERAL");
 
-        var hotkeyBox = new WpfTextBox
-        {
-            Text = s.Hotkey, Width = 160, FontSize = 12, Padding = new Thickness(7, 4, 7, 4),
-            Background = BrushFromHex("#1e1e1e"), Foreground = (WpfBrush)FindResource("Text1Brush"),
-            BorderBrush = (WpfBrush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
-        };
+        var hotkeyBox = StyledInput(s.Hotkey);
         SettingRow("Hotkey", "Global shortcut to open/close", hotkeyBox);
 
-        var maxBox = new WpfTextBox
-        {
-            Text = s.MaxHistory.ToString(), Width = 80, FontSize = 12, Padding = new Thickness(7, 4, 7, 4),
-            Background = BrushFromHex("#1e1e1e"), Foreground = (WpfBrush)FindResource("Text1Brush"),
-            BorderBrush = (WpfBrush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
-        };
+        var maxBox = StyledInput(s.MaxHistory.ToString(), 80);
         SettingRow("Max History", "Unpinned clips to keep", maxBox);
 
         var startupCb = new WpfCheckBox { IsChecked = s.RunOnStartup, Foreground = (WpfBrush)FindResource("Text1Brush") };
@@ -694,12 +716,7 @@ public partial class MainWindow : Window
         }
         SettingsForm.Children.Add(tagsWrap);
 
-        var newTagBox = new WpfTextBox
-        {
-            Width = 160, FontSize = 12, Padding = new Thickness(7, 4, 7, 4),
-            Background = BrushFromHex("#1e1e1e"), Foreground = (WpfBrush)FindResource("Text1Brush"),
-            BorderBrush = (WpfBrush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
-        };
+        var newTagBox = StyledInput("");
         var addTagBtn = CardBtn("Add Tag", "ActionBtn");
         void DoAddTag()
         {

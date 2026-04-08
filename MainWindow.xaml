@@ -10,6 +10,7 @@
         Topmost="True"
         ShowInTaskbar="False"
         Background="{StaticResource BgBrush}"
+        FontFamily="{StaticResource AppFont}"
         Deactivated="Window_Deactivated"
         SizeChanged="Window_SizeChanged"
         KeyDown="Window_KeyDown">
@@ -20,127 +21,142 @@
                   GlassFrameThickness="0"/>
   </WindowChrome.WindowChrome>
 
-  <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="36"/>   <!-- Title bar -->
-      <RowDefinition Height="Auto"/> <!-- Search + Paste Top -->
-      <RowDefinition Height="Auto"/> <!-- Filter chips -->
-      <RowDefinition Height="Auto"/> <!-- Tag filter chips -->
-      <RowDefinition Height="Auto"/> <!-- Tab strip -->
-      <RowDefinition Height="*"/>    <!-- Tab content -->
-    </Grid.RowDefinitions>
+  <!-- Outer border gives the window a subtle rounded edge -->
+  <Border Background="{StaticResource BgBrush}"
+          BorderBrush="{StaticResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="10">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="40"/>   <!-- Title bar -->
+        <RowDefinition Height="Auto"/> <!-- Search + Paste Top -->
+        <RowDefinition Height="Auto"/> <!-- Filter chips -->
+        <RowDefinition Height="Auto"/> <!-- Tag filter chips -->
+        <RowDefinition Height="Auto"/> <!-- Tab strip -->
+        <RowDefinition Height="*"/>    <!-- Tab content -->
+      </Grid.RowDefinitions>
 
-    <!-- Title bar -->
-    <Grid Grid.Row="0" Background="#111111"
-          MouseLeftButtonDown="TitleBar_MouseDown">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="36"/>
-      </Grid.ColumnDefinitions>
-      <TextBlock Grid.Column="0" Text="ClipMaster"
+      <!-- Title bar -->
+      <Border Grid.Row="0" CornerRadius="10,10,0,0">
+        <Grid Background="Transparent"
+              MouseLeftButtonDown="TitleBar_MouseDown">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0" Orientation="Horizontal"
+                      VerticalAlignment="Center" Margin="14,0,0,0">
+            <TextBlock Text="ClipMaster"
+                       Foreground="{StaticResource Text1Brush}"
+                       FontSize="13.5" FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+            <TextBlock Text="clipboard manager"
+                       Foreground="{StaticResource Text3Brush}"
+                       FontSize="10" FontWeight="Normal"
+                       VerticalAlignment="Center" Margin="8,1,0,0"/>
+          </StackPanel>
+          <Button Grid.Column="1" Content="✕"
+                  Style="{StaticResource CloseBtn}"
+                  Margin="0,0,6,0"
+                  VerticalAlignment="Center"
+                  Click="CloseBtn_Click"/>
+        </Grid>
+      </Border>
+
+      <!-- Search + Paste Top -->
+      <Grid Grid.Row="1" Margin="10,4,10,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <TextBox x:Name="SearchBox" Grid.Column="0"
+                 Background="{StaticResource SurfaceBrush}"
                  Foreground="{StaticResource Text1Brush}"
-                 FontSize="13" FontWeight="SemiBold"
-                 VerticalAlignment="Center" Margin="12,0,0,0"/>
-      <Button Grid.Column="1" Content="✕"
-              Background="Transparent" Foreground="{StaticResource Text2Brush}"
-              BorderThickness="0" FontSize="14" Cursor="Hand"
-              VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
-              Click="CloseBtn_Click"/>
-    </Grid>
+                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                 Padding="10,7" FontSize="12.5"
+                 FontFamily="{StaticResource AppFont}"
+                 CaretBrush="{StaticResource AccentBrush}"
+                 TextChanged="SearchBox_TextChanged" KeyDown="SearchBox_KeyDown">
+          <TextBox.Template>
+            <ControlTemplate TargetType="TextBox">
+              <Border Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="8" Padding="{TemplateBinding Padding}">
+                <ScrollViewer x:Name="PART_ContentHost"/>
+              </Border>
+            </ControlTemplate>
+          </TextBox.Template>
+        </TextBox>
+        <Button x:Name="PasteTopBtn" Grid.Column="1"
+                Content="Paste Top" Margin="8,0,0,0"
+                Style="{StaticResource PasteBtn}"
+                Click="PasteTopBtn_Click"/>
+      </Grid>
 
-    <!-- Search + Paste Top -->
-    <Grid Grid.Row="1" Margin="8,8,8,0">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="Auto"/>
-      </Grid.ColumnDefinitions>
-      <TextBox x:Name="SearchBox" Grid.Column="0"
-               Background="#1e1e1e" Foreground="{StaticResource Text1Brush}"
-               BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
-               Padding="8,6" FontSize="13" CaretBrush="{StaticResource AccentBrush}"
-               TextChanged="SearchBox_TextChanged" KeyDown="SearchBox_KeyDown">
-        <TextBox.Template>
-          <ControlTemplate TargetType="TextBox">
-            <Border Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="6" Padding="{TemplateBinding Padding}">
-              <ScrollViewer x:Name="PART_ContentHost"/>
-            </Border>
-          </ControlTemplate>
-        </TextBox.Template>
-      </TextBox>
-      <Button x:Name="PasteTopBtn" Grid.Column="1"
-              Content="Paste Top" Margin="6,0,0,0"
-              Style="{StaticResource PasteBtn}"
-              Click="PasteTopBtn_Click"/>
-    </Grid>
-
-    <!-- Filter chips -->
-    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="8,6,8,0">
-      <ToggleButton x:Name="FilterAll"       Content="All"       Tag="all"
-                    Style="{StaticResource TabBtn}" IsChecked="True"
-                    Checked="FilterChip_Checked" Margin="0,0,4,0"/>
-      <ToggleButton x:Name="FilterPinned"    Content="Pinned"    Tag="pinned"
-                    Style="{StaticResource TabBtn}"
-                    Checked="FilterChip_Checked" Margin="0,0,4,0"/>
-      <ToggleButton x:Name="FilterSensitive" Content="Sensitive" Tag="sensitive"
-                    Style="{StaticResource TabBtn}"
-                    Checked="FilterChip_Checked"/>
-    </StackPanel>
-
-    <!-- Tag filter chips (dynamic) -->
-    <WrapPanel x:Name="TagFilterChips" Grid.Row="3" Margin="8,4,8,0"/>
-
-    <!-- Tab strip -->
-    <Border Grid.Row="4" BorderBrush="{StaticResource BorderBrush}"
-            BorderThickness="0,1,0,0" Margin="0,6,0,0">
-      <StackPanel Orientation="Horizontal">
-        <ToggleButton x:Name="TabStack"    Content="Stack"    Tag="stack"
+      <!-- Filter chips -->
+      <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="10,8,10,0">
+        <ToggleButton x:Name="FilterAll"       Content="All"       Tag="all"
                       Style="{StaticResource TabBtn}" IsChecked="True"
-                      Checked="Tab_Checked"/>
-        <ToggleButton x:Name="TabRules"    Content="Rules"    Tag="rules"
-                      Style="{StaticResource TabBtn}" Checked="Tab_Checked"/>
-        <ToggleButton x:Name="TabSettings" Content="Settings" Tag="settings"
-                      Style="{StaticResource TabBtn}" Checked="Tab_Checked"/>
+                      Checked="FilterChip_Checked"/>
+        <ToggleButton x:Name="FilterPinned"    Content="Pinned"    Tag="pinned"
+                      Style="{StaticResource TabBtn}"
+                      Checked="FilterChip_Checked"/>
+        <ToggleButton x:Name="FilterSensitive" Content="Sensitive" Tag="sensitive"
+                      Style="{StaticResource TabBtn}"
+                      Checked="FilterChip_Checked"/>
       </StackPanel>
-    </Border>
 
-    <!-- Tab content -->
-    <Grid Grid.Row="5">
+      <!-- Tag filter chips (dynamic) -->
+      <WrapPanel x:Name="TagFilterChips" Grid.Row="3" Margin="10,4,10,0"/>
 
-      <!-- Stack panel -->
-      <ScrollViewer x:Name="StackScrollView" VerticalScrollBarVisibility="Auto">
-        <StackPanel x:Name="ClipList" Margin="8"/>
-      </ScrollViewer>
-
-      <!-- Rules panel -->
-      <ScrollViewer x:Name="RulesScrollView" Visibility="Collapsed"
-                    VerticalScrollBarVisibility="Auto">
-        <StackPanel x:Name="RulesList" Margin="8">
-          <Button x:Name="AddRuleBtn" Content="+ Add Rule"
-                  Style="{StaticResource ActionBtn}"
-                  HorizontalAlignment="Left" Margin="0,4,0,8"
-                  Click="AddRule_Click"/>
+      <!-- Tab strip -->
+      <Border Grid.Row="4" BorderBrush="{StaticResource BorderBrush}"
+              BorderThickness="0,1,0,0" Margin="0,8,0,0">
+        <StackPanel Orientation="Horizontal" Margin="6,0,0,0">
+          <ToggleButton x:Name="TabStack"    Content="Stack"    Tag="stack"
+                        Style="{StaticResource MainTabBtn}" IsChecked="True"
+                        Checked="Tab_Checked"/>
+          <ToggleButton x:Name="TabRules"    Content="Rules"    Tag="rules"
+                        Style="{StaticResource MainTabBtn}" Checked="Tab_Checked"/>
+          <ToggleButton x:Name="TabSettings" Content="Settings" Tag="settings"
+                        Style="{StaticResource MainTabBtn}" Checked="Tab_Checked"/>
         </StackPanel>
-      </ScrollViewer>
+      </Border>
 
-      <!-- Settings panel -->
-      <ScrollViewer x:Name="SettingsScrollView" Visibility="Collapsed"
-                    VerticalScrollBarVisibility="Auto">
-        <StackPanel x:Name="SettingsForm" Margin="12"/>
-      </ScrollViewer>
+      <!-- Tab content -->
+      <Grid Grid.Row="5">
+        <ScrollViewer x:Name="StackScrollView" VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="ClipList" Margin="10,8,10,8"/>
+        </ScrollViewer>
+
+        <ScrollViewer x:Name="RulesScrollView" Visibility="Collapsed"
+                      VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="RulesList" Margin="10,8,10,8">
+            <Button x:Name="AddRuleBtn" Content="+ Add Rule"
+                    Style="{StaticResource ActionBtn}"
+                    HorizontalAlignment="Left" Margin="0,4,0,10"
+                    Click="AddRule_Click"/>
+          </StackPanel>
+        </ScrollViewer>
+
+        <ScrollViewer x:Name="SettingsScrollView" Visibility="Collapsed"
+                      VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="SettingsForm" Margin="14,8,14,8"/>
+        </ScrollViewer>
+      </Grid>
+
+      <!-- Toast overlay -->
+      <Border x:Name="ToastBorder"
+              Grid.RowSpan="6"
+              Background="#2a2a2a" CornerRadius="10" Padding="16,8"
+              HorizontalAlignment="Center" VerticalAlignment="Bottom"
+              Margin="0,0,0,14" Opacity="0" IsHitTestVisible="False"
+              BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+        <TextBlock x:Name="ToastText" Foreground="{StaticResource Text1Brush}"
+                   FontSize="12" FontFamily="{StaticResource AppFont}"/>
+      </Border>
 
     </Grid>
-
-    <!-- Toast overlay -->
-    <Border x:Name="ToastBorder"
-            Grid.RowSpan="6"
-            Background="#333333" CornerRadius="6" Padding="14,7"
-            HorizontalAlignment="Center" VerticalAlignment="Bottom"
-            Margin="0,0,0,16" Opacity="0" IsHitTestVisible="False">
-      <TextBlock x:Name="ToastText" Foreground="White" FontSize="12"/>
-    </Border>
-
-  </Grid>
+  </Border>
 </Window>
