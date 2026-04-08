@@ -124,15 +124,17 @@
     <Setter Property="Margin" Value="0,0,3,0"/>
   </Style>
 
-  <!-- Thin scrollbar -->
+  <!-- Thin vertical scrollbar (4px, rounded, subtle) -->
   <Style TargetType="ScrollBar">
     <Setter Property="Background" Value="Transparent"/>
-    <Setter Property="Width" Value="6"/>
+    <Setter Property="Width" Value="4"/>
+    <Setter Property="MinWidth" Value="4"/>
+    <Setter Property="SnapsToDevicePixels" Value="True"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ScrollBar">
-          <Grid>
-            <Track x:Name="PART_Track" IsDirectionReversed="True">
+          <Border Background="Transparent" Width="4">
+            <Track x:Name="PART_Track" IsDirectionReversed="True" Width="4">
               <Track.DecreaseRepeatButton>
                 <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Height="0"/>
               </Track.DecreaseRepeatButton>
@@ -140,7 +142,7 @@
                 <Thumb>
                   <Thumb.Template>
                     <ControlTemplate TargetType="Thumb">
-                      <Border Background="#444444" CornerRadius="3"/>
+                      <Border Background="#3a3a3a" CornerRadius="2" Margin="0,2"/>
                     </ControlTemplate>
                   </Thumb.Template>
                 </Thumb>
@@ -149,6 +151,30 @@
                 <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Height="0"/>
               </Track.IncreaseRepeatButton>
             </Track>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- Override ScrollViewer to use thin scrollbar column -->
+  <Style TargetType="ScrollViewer">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ScrollViewer">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ScrollContentPresenter Grid.Column="0"/>
+            <ScrollBar x:Name="PART_VerticalScrollBar"
+                       Grid.Column="1"
+                       Orientation="Vertical"
+                       Value="{TemplateBinding VerticalOffset}"
+                       Maximum="{TemplateBinding ScrollableHeight}"
+                       ViewportSize="{TemplateBinding ViewportHeight}"
+                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
           </Grid>
         </ControlTemplate>
       </Setter.Value>
