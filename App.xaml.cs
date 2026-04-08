@@ -14,6 +14,7 @@ public partial class App : Application
     private readonly HotkeyService    _hotkey = new();
     private AppData _db = new();
     private string  _lastClip = "";
+    private bool    _suppressing;   // prevents re-entrant clipboard handling
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -47,6 +48,9 @@ public partial class App : Application
 
         SetupTray();
 
+        // Sync startup registry with setting
+        StartupService.SetRunOnStartup(_db.Settings.RunOnStartup);
+
         // Don't show window on startup — live in tray only
     }
 
@@ -55,11 +59,20 @@ public partial class App : Application
         Icon icon;
         try
         {
-            var uri    = new Uri("pack://application:,,,/Assets/icon.ico");
-            var stream = GetResourceStream(uri)?.Stream;
-            icon = stream != null ? new Icon(stream) : SystemIcons.Application;
+            // Use PNG for proper transparency (ICO files had white corners)
+            var uri    = new Uri("pack://application:,,,/Assets/icon-32.png");
+            using var stream = GetResourceStream(uri)?.Stream;
+            if (stream != null)
+            {
+                using var bmp = new Bitmap(stream);
+                icon = Icon.FromHandle(bmp.GetHicon());
+            }
+            else
+            {
+                icon = (Icon)SystemIcons.Application.Clone();
+            }
         }
-        catch { icon = SystemIcons.Application; }
+        catch { icon = (Icon)SystemIcons.Application.Clone(); }
 
         _tray = new NotifyIcon
         {
@@ -106,6 +119,7 @@ public partial class App : Application
 
     private void OnNewClip(string text)
     {
+        if (_suppressing) return;
         if (text == _lastClip) return;
         _lastClip = text;
 
@@ -114,7 +128,9 @@ public partial class App : Application
         if (wasTransformed)
         {
             _lastClip = finalText;
-            Dispatcher.Invoke(() => System.Windows.Clipboard.SetText(finalText));
+            _suppressing = true;
+            try { Dispatcher.Invoke(() => System.Windows.Clipboard.SetText(finalText)); }
+            finally { _suppressing = false; }
         }
 
         Dispatcher.Invoke(() =>
@@ -130,13 +146,20 @@ public partial class App : Application
         if (clip == null) return;
 
         _data.PromoteClip(_db, clipId);
-        _lastClip = clip.Text;
+        var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+        if (string.IsNullOrEmpty(text)) return;
 
-        Dispatcher.Invoke(() =>
+        _lastClip = text;
+        _suppressing = true;
+        try
         {
-            System.Windows.Clipboard.SetText(clip.Text);
-            _window?.Hide();
-        });
+            Dispatcher.Invoke(() =>
+            {
+                System.Windows.Clipboard.SetText(text);
+                _window?.Hide();
+            });
+        }
+        finally { _suppressing = false; }
 
         Task.Run(() => PasteService.Paste(150));
     }
@@ -146,12 +169,20 @@ public partial class App : Application
         var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId);
         if (clip == null) return;
 
-        _lastClip = clip.Text;
-        Dispatcher.Invoke(() =>
+        var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+        if (string.IsNullOrEmpty(text)) return;
+
+        _lastClip = text;
+        _suppressing = true;
+        try
         {
-            System.Windows.Clipboard.SetText(clip.Text);
-            _window?.Hide();
-        });
+            Dispatcher.Invoke(() =>
+            {
+                System.Windows.Clipboard.SetText(text);
+                _window?.Hide();
+            });
+        }
+        finally { _suppressing = false; }
 
         Task.Run(() => PasteService.Paste(150));
     }

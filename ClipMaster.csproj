@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\icon.ico" />
+    <Resource Include="Assets\icon-32.png" />
     <Resource Include="Themes\Dark.xaml" />
   </ItemGroup>
 </Project>

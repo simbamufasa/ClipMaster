@@ -31,6 +31,8 @@ public partial class MainWindow : Window
     private string  _activeTab = "stack";
 
     private DispatcherTimer? _toastTimer;
+    private DispatcherTimer? _resizeSaveTimer;
+    private bool _dialogOpen;
 
     public MainWindow(AppData db, DataService svc)
     {
@@ -85,14 +87,17 @@ public partial class MainWindow : Window
 
     private void Window_Deactivated(object sender, EventArgs e)
     {
-        if (IsVisible) Hide();
+        if (IsVisible && !_dialogOpen) Hide();
     }
 
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         _db.Settings.WindowWidth  = (int)e.NewSize.Width;
         _db.Settings.WindowHeight = (int)e.NewSize.Height;
-        _svc.Save(_db);
+        _resizeSaveTimer?.Stop();
+        _resizeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _resizeSaveTimer.Tick += (_, _) => { _svc.Save(_db); _resizeSaveTimer.Stop(); };
+        _resizeSaveTimer.Start();
     }
 
     public void PositionNearCursor()
@@ -390,10 +395,10 @@ public partial class MainWindow : Window
             Child   = cardContent,
         };
 
-        // Double-click → paste and promote
+        // Double-click on card body (not buttons) → paste and promote
         card.MouseLeftButtonDown += (_, e) =>
         {
-            if (e.ClickCount == 2)
+            if (e.ClickCount == 2 && e.OriginalSource is not WpfButton)
                 ((App)WpfApp.Current).OnPasteAndPromote(clip.Id);
         };
 
@@ -457,9 +462,14 @@ public partial class MainWindow : Window
     // ── Tag dialog ───────────────────────────────────────────────────────────
     private void OpenTagDialog(ClipEntry clip)
     {
-        var dlg = new TagDialog(_db, _svc, clip) { Owner = this };
-        if (dlg.ShowDialog() == true)
-            RenderStack();
+        _dialogOpen = true;
+        try
+        {
+            var dlg = new TagDialog(_db, _svc, clip) { Owner = this };
+            if (dlg.ShowDialog() == true)
+                RenderStack();
+        }
+        finally { _dialogOpen = false; }
     }
 
     // ── Rules ────────────────────────────────────────────────────────────────
@@ -520,14 +530,19 @@ public partial class MainWindow : Window
 
         editBtn.Click += (_, _) =>
         {
-            var dlg = new RuleDialog(rule) { Owner = this };
-            if (dlg.ShowDialog() == true)
+            _dialogOpen = true;
+            try
             {
-                var idx = _db.Rules.IndexOf(rule);
-                if (idx >= 0) _db.Rules[idx] = dlg.Result;
-                _svc.Save(_db);
-                RenderRules();
+                var dlg = new RuleDialog(rule) { Owner = this };
+                if (dlg.ShowDialog() == true)
+                {
+                    var idx = _db.Rules.IndexOf(rule);
+                    if (idx >= 0) _db.Rules[idx] = dlg.Result;
+                    _svc.Save(_db);
+                    RenderRules();
+                }
             }
+            finally { _dialogOpen = false; }
         };
         delBtn.Click += (_, _) =>
         {
@@ -559,13 +574,18 @@ public partial class MainWindow : Window
 
     private void AddRule_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new RuleDialog { Owner = this };
-        if (dlg.ShowDialog() == true)
+        _dialogOpen = true;
+        try
         {
-            _db.Rules.Add(dlg.Result);
-            _svc.Save(_db);
-            RenderRules();
+            var dlg = new RuleDialog { Owner = this };
+            if (dlg.ShowDialog() == true)
+            {
+                _db.Rules.Add(dlg.Result);
+                _svc.Save(_db);
+                RenderRules();
+            }
         }
+        finally { _dialogOpen = false; }
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────
@@ -618,6 +638,9 @@ public partial class MainWindow : Window
             BorderBrush = (WpfBrush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
         };
         SettingRow("Max History", "Unpinned clips to keep", maxBox);
+
+        var startupCb = new WpfCheckBox { IsChecked = s.RunOnStartup, Foreground = (WpfBrush)FindResource("Text1Brush") };
+        SettingRow("Run on startup", "Launch ClipMaster when Windows starts", startupCb);
 
         // Privacy
         SectionHeader("PRIVACY");
@@ -702,14 +725,19 @@ public partial class MainWindow : Window
         var clearBtn = CardBtn("Clear History", "DangerBtn");
         clearBtn.Click += (_, _) =>
         {
-            if (WpfMessageBox.Show("Clear all unpinned history? Cannot be undone.",
-                "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+            _dialogOpen = true;
+            try
             {
-                _db.Clips = _db.Clips.Where(c => c.Pinned).ToList();
-                _svc.Save(_db);
-                RenderStack();
-                ShowToast("History cleared");
+                if (WpfMessageBox.Show("Clear all unpinned history? Cannot be undone.",
+                    "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                {
+                    _db.Clips = _db.Clips.Where(c => c.Pinned).ToList();
+                    _svc.Save(_db);
+                    RenderStack();
+                    ShowToast("History cleared");
+                }
             }
+            finally { _dialogOpen = false; }
         };
         SettingRow("Clear clip history", "Removes all unpinned clips permanently", clearBtn);
 
@@ -725,8 +753,10 @@ public partial class MainWindow : Window
             s.MaxHistory     = int.TryParse(maxBox.Text, out var m) ? m : 500;
             s.MaskPasswords  = maskCb.IsChecked == true;
             s.AutoApplyRules = autoRulesCb.IsChecked == true;
+            s.RunOnStartup   = startupCb.IsChecked == true;
             _svc.Save(_db);
             ((App)WpfApp.Current).RehostHotkey(s.Hotkey);
+            StartupService.SetRunOnStartup(s.RunOnStartup);
             ShowToast("Settings saved");
         };
         SettingsForm.Children.Add(saveBtn);

@@ -48,9 +48,19 @@ public partial class RuleDialog : Window
             var opts  = RegexOptions.None;
             if (flags.Contains('i')) opts |= RegexOptions.IgnoreCase;
             if (flags.Contains('m')) opts |= RegexOptions.Multiline;
-            var result = new Regex(pattern, opts).Replace(test, ReplacementBox.Text ?? "");
+            var rx     = new Regex(pattern, opts, TimeSpan.FromSeconds(1));
+            var count  = flags.Contains('g') ? -1 : 1;
+            var result = count == -1
+                ? rx.Replace(test, ReplacementBox.Text ?? "")
+                : rx.Replace(test, ReplacementBox.Text ?? "", count);
             TestResult.Text       = result.Length > 0 ? result : "(empty result)";
             TestResult.Foreground = new SolidColorBrush(WpfColor.FromRgb(0x4c, 0xaf, 0x82));
+            TestResult.Visibility = Visibility.Visible;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            TestResult.Text       = "Regex timed out (pattern too complex)";
+            TestResult.Foreground = new SolidColorBrush(WpfColor.FromRgb(0xe0, 0x52, 0x52));
             TestResult.Visibility = Visibility.Visible;
         }
         catch (Exception ex)
@@ -65,7 +75,7 @@ public partial class RuleDialog : Window
     {
         if (string.IsNullOrWhiteSpace(NameBox.Text))    { WpfMessageBox.Show("Name is required");    return; }
         if (string.IsNullOrWhiteSpace(PatternBox.Text)) { WpfMessageBox.Show("Pattern is required"); return; }
-        try { _ = new Regex(PatternBox.Text); }
+        try { _ = new Regex(PatternBox.Text, RegexOptions.None, TimeSpan.FromSeconds(1)); }
         catch (Exception ex) { WpfMessageBox.Show($"Invalid regex: {ex.Message}"); return; }
 
         var modeItem = (ComboBoxItem)ModeBox.SelectedItem;
