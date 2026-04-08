@@ -1,0 +1,17 @@
+<Window x:Class="ClipMaster.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ClipMaster"
+        Width="480" Height="640"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        ResizeMode="CanResize"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Background="{StaticResource BgBrush}">
+  <Grid>
+    <TextBlock Text="ClipMaster Loading..."
+               HorizontalAlignment="Center" VerticalAlignment="Center"
+               Foreground="White"/>
+  </Grid>
+</Window>
