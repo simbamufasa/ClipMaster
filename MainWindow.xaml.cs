@@ -10,8 +10,13 @@ using WpfApp         = System.Windows.Application;
 using WpfBrush       = System.Windows.Media.Brush;
 using WpfBrushes     = System.Windows.Media.Brushes;
 using WpfButton      = System.Windows.Controls.Button;
+using WpfCheckBox    = System.Windows.Controls.CheckBox;
+using WpfCursors     = System.Windows.Input.Cursors;
+using WpfFontFamily  = System.Windows.Media.FontFamily;
 using WpfKeyArgs     = System.Windows.Input.KeyEventArgs;
+using WpfMessageBox  = System.Windows.MessageBox;
 using WpfOrientation = System.Windows.Controls.Orientation;
+using WpfTextBox     = System.Windows.Controls.TextBox;
 
 namespace ClipMaster;
 
@@ -449,13 +454,281 @@ public partial class MainWindow : Window
         _toastTimer.Start();
     }
 
-    // ── Tag dialog stub (implemented in Task 6) ──────────────────────────────
-    private void OpenTagDialog(ClipEntry clip) { /* filled in next task */ }
+    // ── Tag dialog ───────────────────────────────────────────────────────────
+    private void OpenTagDialog(ClipEntry clip)
+    {
+        var dlg = new TagDialog(_db, _svc, clip) { Owner = this };
+        if (dlg.ShowDialog() == true)
+            RenderStack();
+    }
 
     // ── Rules ────────────────────────────────────────────────────────────────
-    private void RenderRules()  { /* filled in next task */ }
-    private void AddRule_Click(object sender, RoutedEventArgs e) { /* filled in next task */ }
+    private void RenderRules()
+    {
+        // Keep the Add Rule button (first child), remove rest
+        while (RulesList.Children.Count > 1)
+            RulesList.Children.RemoveAt(1);
+
+        foreach (var rule in _db.Rules)
+            RulesList.Children.Add(BuildRuleCard(rule));
+    }
+
+    private UIElement BuildRuleCard(Rule rule)
+    {
+        var nameTb = new TextBlock
+        {
+            Text       = rule.Name,
+            FontSize   = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (WpfBrush)FindResource("Text1Brush"),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var modeBg = rule.Mode == "auto" ? "#1a3a2a" : "#2a2460";
+        var modeFg = rule.Mode == "auto" ? "#4caf82" : "#a89ef7";
+        var badge  = MakeBadge(rule.Mode, modeBg, modeFg);
+
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        DockPanel.SetDock(badge, Dock.Right);
+        header.Children.Add(badge);
+        header.Children.Add(nameTb);
+
+        var patternTb = new TextBlock
+        {
+            Text         = $"/{rule.Pattern}/{rule.Flags}  →  {(string.IsNullOrEmpty(rule.Replacement) ? "(delete)" : rule.Replacement)}",
+            FontSize     = 11,
+            FontFamily   = new WpfFontFamily("Consolas"),
+            Foreground   = (WpfBrush)FindResource("Text2Brush"),
+            Margin       = new Thickness(0, 0, 0, 6),
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        var enabledCb = new WpfCheckBox
+        {
+            Content   = "Enabled",
+            IsChecked = rule.Enabled,
+            Foreground = (WpfBrush)FindResource("Text2Brush"),
+            FontSize  = 11,
+            Margin    = new Thickness(0, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        enabledCb.Checked   += (_, _) => { rule.Enabled = true;  _svc.Save(_db); };
+        enabledCb.Unchecked += (_, _) => { rule.Enabled = false; _svc.Save(_db); };
+
+        var editBtn = CardBtn("Edit",   "ActionBtn");
+        var delBtn  = CardBtn("Delete", "DangerBtn");
+
+        editBtn.Click += (_, _) =>
+        {
+            var dlg = new RuleDialog(rule) { Owner = this };
+            if (dlg.ShowDialog() == true)
+            {
+                var idx = _db.Rules.IndexOf(rule);
+                if (idx >= 0) _db.Rules[idx] = dlg.Result;
+                _svc.Save(_db);
+                RenderRules();
+            }
+        };
+        delBtn.Click += (_, _) =>
+        {
+            _db.Rules.Remove(rule);
+            _svc.Save(_db);
+            RenderRules();
+        };
+
+        var btnRow = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+        btnRow.Children.Add(enabledCb);
+        btnRow.Children.Add(editBtn);
+        btnRow.Children.Add(delBtn);
+
+        var content = new StackPanel { Margin = new Thickness(10) };
+        content.Children.Add(header);
+        content.Children.Add(patternTb);
+        content.Children.Add(btnRow);
+
+        return new Border
+        {
+            Background    = BrushFromHex("#1e1e1e"),
+            BorderBrush   = (WpfBrush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius  = new CornerRadius(8),
+            Margin        = new Thickness(0, 0, 0, 6),
+            Child         = content,
+        };
+    }
+
+    private void AddRule_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new RuleDialog { Owner = this };
+        if (dlg.ShowDialog() == true)
+        {
+            _db.Rules.Add(dlg.Result);
+            _svc.Save(_db);
+            RenderRules();
+        }
+    }
 
     // ── Settings ─────────────────────────────────────────────────────────────
-    private void RenderSettings() { /* filled in next task */ }
+    private void RenderSettings()
+    {
+        SettingsForm.Children.Clear();
+        var s = _db.Settings;
+
+        void SectionHeader(string title)
+        {
+            SettingsForm.Children.Add(new TextBlock
+            {
+                Text       = title,
+                FontSize   = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (WpfBrush)FindResource("Text3Brush"),
+                Margin     = new Thickness(0, 10, 0, 8),
+            });
+        }
+
+        void SettingRow(string label, string desc, UIElement control)
+        {
+            var lbl  = new TextBlock { Text = label, FontSize = 13, Foreground = (WpfBrush)FindResource("Text1Brush") };
+            var dsc  = new TextBlock { Text = desc,  FontSize = 11, Foreground = (WpfBrush)FindResource("Text2Brush") };
+            var left = new StackPanel();
+            left.Children.Add(lbl);
+            left.Children.Add(dsc);
+            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 10), LastChildFill = true };
+            DockPanel.SetDock(control, Dock.Right);
+            row.Children.Add(control);
+            row.Children.Add(left);
+            SettingsForm.Children.Add(row);
+        }
+
+        // General
+        SectionHeader("GENERAL");
+
+        var hotkeyBox = new WpfTextBox
+        {
+            Text = s.Hotkey, Width = 160, FontSize = 12, Padding = new Thickness(7, 4, 7, 4),
+            Background = BrushFromHex("#1e1e1e"), Foreground = (WpfBrush)FindResource("Text1Brush"),
+            BorderBrush = (WpfBrush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
+        };
+        SettingRow("Hotkey", "Global shortcut to open/close", hotkeyBox);
+
+        var maxBox = new WpfTextBox
+        {
+            Text = s.MaxHistory.ToString(), Width = 80, FontSize = 12, Padding = new Thickness(7, 4, 7, 4),
+            Background = BrushFromHex("#1e1e1e"), Foreground = (WpfBrush)FindResource("Text1Brush"),
+            BorderBrush = (WpfBrush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
+        };
+        SettingRow("Max History", "Unpinned clips to keep", maxBox);
+
+        // Privacy
+        SectionHeader("PRIVACY");
+
+        var maskCb = new WpfCheckBox { IsChecked = s.MaskPasswords, Foreground = (WpfBrush)FindResource("Text1Brush") };
+        SettingRow("Mask sensitive content", "Blur passwords & tokens", maskCb);
+
+        // Rules
+        SectionHeader("RULES");
+
+        var autoRulesCb = new WpfCheckBox { IsChecked = s.AutoApplyRules, Foreground = (WpfBrush)FindResource("Text1Brush") };
+        SettingRow("Auto-apply rules on copy", "Run \"auto\" rules when something is copied", autoRulesCb);
+
+        // Tags
+        SectionHeader("TAGS");
+
+        var tagsWrap = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+        foreach (var tag in _db.Tags)
+        {
+            var t    = tag;
+            var pill = new Border
+            {
+                Background   = BrushFromHex("#2a2460"),
+                CornerRadius = new CornerRadius(4),
+                Padding      = new Thickness(6, 2, 4, 2),
+                Margin       = new Thickness(0, 0, 4, 4),
+            };
+            var row = new StackPanel { Orientation = WpfOrientation.Horizontal };
+            row.Children.Add(new TextBlock
+            {
+                Text = t, FontSize = 11, Foreground = (WpfBrush)FindResource("AccentBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            var x = new WpfButton
+            {
+                Content = "✕", Background = WpfBrushes.Transparent, BorderThickness = new Thickness(0),
+                Foreground = (WpfBrush)FindResource("Text3Brush"), FontSize = 9,
+                Padding = new Thickness(3, 0, 0, 0), Cursor = WpfCursors.Hand,
+            };
+            x.Click += (_, _) =>
+            {
+                _db.Tags.Remove(t);
+                _db.Clips.ForEach(c => c.Tags.Remove(t));
+                _svc.Save(_db);
+                RenderSettings();
+                RenderStack();
+            };
+            row.Children.Add(x);
+            pill.Child = row;
+            tagsWrap.Children.Add(pill);
+        }
+        SettingsForm.Children.Add(tagsWrap);
+
+        var newTagBox = new WpfTextBox
+        {
+            Width = 160, FontSize = 12, Padding = new Thickness(7, 4, 7, 4),
+            Background = BrushFromHex("#1e1e1e"), Foreground = (WpfBrush)FindResource("Text1Brush"),
+            BorderBrush = (WpfBrush)FindResource("BorderBrush"), BorderThickness = new Thickness(1),
+        };
+        var addTagBtn = CardBtn("Add Tag", "ActionBtn");
+        void DoAddTag()
+        {
+            var raw = newTagBox.Text.Trim().ToLowerInvariant().Replace(" ", "-");
+            if (string.IsNullOrEmpty(raw) || _db.Tags.Contains(raw)) { newTagBox.Clear(); return; }
+            _db.Tags.Add(raw);
+            _svc.Save(_db);
+            newTagBox.Clear();
+            RenderSettings();
+            RenderStack();
+        }
+        addTagBtn.Click += (_, _) => DoAddTag();
+        newTagBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) DoAddTag(); };
+
+        var addTagRow = new StackPanel { Orientation = WpfOrientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+        addTagRow.Children.Add(newTagBox);
+        addTagRow.Children.Add(addTagBtn);
+        SettingsForm.Children.Add(addTagRow);
+
+        // Data
+        SectionHeader("DATA");
+
+        var clearBtn = CardBtn("Clear History", "DangerBtn");
+        clearBtn.Click += (_, _) =>
+        {
+            if (WpfMessageBox.Show("Clear all unpinned history? Cannot be undone.",
+                "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+            {
+                _db.Clips = _db.Clips.Where(c => c.Pinned).ToList();
+                _svc.Save(_db);
+                RenderStack();
+                ShowToast("History cleared");
+            }
+        };
+        SettingRow("Clear clip history", "Removes all unpinned clips permanently", clearBtn);
+
+        // Save button
+        var saveBtn = new WpfButton
+        {
+            Content = "Save Settings", Style = (Style)FindResource("PrimaryBtn"),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0),
+        };
+        saveBtn.Click += (_, _) =>
+        {
+            s.Hotkey         = hotkeyBox.Text.Trim();
+            s.MaxHistory     = int.TryParse(maxBox.Text, out var m) ? m : 500;
+            s.MaskPasswords  = maskCb.IsChecked == true;
+            s.AutoApplyRules = autoRulesCb.IsChecked == true;
+            _svc.Save(_db);
+            ((App)WpfApp.Current).RehostHotkey(s.Hotkey);
+            ShowToast("Settings saved");
+        };
+        SettingsForm.Children.Add(saveBtn);
+    }
 }
