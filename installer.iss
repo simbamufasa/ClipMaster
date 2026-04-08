@@ -52,6 +52,7 @@ Name: "startup"; Description: "Run ClipMaster when Windows &starts"; GroupDescri
 
 [Files]
 Source: "bin\Release\net8.0-windows\win-x64\publish\ClipMaster.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "bin\Release\net8.0-windows\win-x64\publish\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppDescription}"

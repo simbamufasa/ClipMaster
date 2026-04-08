@@ -4,6 +4,22 @@ using System.Text.RegularExpressions;
 
 namespace ClipMaster;
 
+public static class TraceLog
+{
+    private static readonly string LogFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster", "debug.log");
+
+    public static void Write(string message)
+    {
+        try
+        {
+            var line = $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n";
+            File.AppendAllText(LogFile, line);
+        }
+        catch { /* logging must never crash the app */ }
+    }
+}
+
 public class DataService
 {
     private static readonly string DataDir  = Path.Combine(
@@ -81,7 +97,10 @@ public class DataService
                     : rx.Replace(result, rule.Replacement ?? "", count);
                 if (next != result) { applied.Add(rule.Name); result = next; }
             }
-            catch { /* invalid regex or timeout — skip */ }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"Rule '{rule.Name}' failed: {ex.GetType().Name}: {ex.Message}");
+            }
         }
         return (result, applied);
     }

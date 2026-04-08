@@ -30,16 +30,27 @@ public class ClipboardMonitor : IDisposable
     {
         if (msg == WM_CLIPBOARDUPDATE)
         {
-            try
+            // Clipboard may still be locked by the source app (e.g. browser copy buttons).
+            // Retry a few times with a short delay to handle transient locks.
+            for (int attempt = 0; attempt < 5; attempt++)
             {
-                if (System.Windows.Clipboard.ContainsText())
+                try
                 {
-                    var text = System.Windows.Clipboard.GetText();
-                    if (!string.IsNullOrEmpty(text))
-                        NewClipText?.Invoke(text);
+                    if (System.Windows.Clipboard.ContainsText())
+                    {
+                        var text = System.Windows.Clipboard.GetText();
+                        if (!string.IsNullOrEmpty(text))
+                            NewClipText?.Invoke(text);
+                    }
+                    break;
                 }
+                catch (COMException)
+                {
+                    if (attempt < 4)
+                        Thread.Sleep(30);
+                }
+                catch { break; }
             }
-            catch { /* clipboard can throw during rapid changes */ }
         }
         return IntPtr.Zero;
     }
