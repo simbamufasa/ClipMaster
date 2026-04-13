@@ -17,4 +17,7 @@
     <Resource Include="Assets\icon-32.png" />
     <Resource Include="Themes\Dark.xaml" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
 </Project>
