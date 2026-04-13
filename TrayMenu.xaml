@@ -47,6 +47,31 @@
       <!-- Separator -->
       <Border Height="1" Background="#333333" Margin="10,4"/>
 
+      <!-- Export backup -->
+      <Border x:Name="ExportItem"
+              Background="Transparent"
+              CornerRadius="6"
+              Padding="14,9"
+              Margin="2,0"
+              Cursor="Hand"
+              MouseLeftButtonUp="ExportItem_Click"
+              MouseEnter="Item_MouseEnter"
+              MouseLeave="Item_MouseLeave">
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Text="&#xE792;" FontFamily="Segoe MDL2 Assets"
+                     FontSize="13" Foreground="#8e8e8e"
+                     VerticalAlignment="Center" Margin="0,0,10,0"/>
+          <TextBlock Text="Export backup…"
+                     FontFamily="Segoe UI Variable, Segoe UI"
+                     FontSize="12.5" FontWeight="Medium"
+                     Foreground="#e0e0e0"
+                     VerticalAlignment="Center"/>
+        </StackPanel>
+      </Border>
+
+      <!-- Separator -->
+      <Border Height="1" Background="#333333" Margin="10,4"/>
+
       <!-- Quit -->
       <Border x:Name="QuitItem"
               Background="Transparent"

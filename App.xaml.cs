@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.IO;
 using System.Windows;
 using System.Windows.Forms;
 using Application = System.Windows.Application;
@@ -123,6 +124,7 @@ public partial class App : Application
         // Custom WPF tray menu (no WinForms ContextMenuStrip)
         _trayMenu = new TrayMenu();
         _trayMenu.ShowRequested += ToggleWindow;
+        _trayMenu.ExportRequested += OnExportBackup;
         _trayMenu.QuitRequested += Quit;
 
         _tray.MouseClick += (_, args) =>
@@ -132,6 +134,29 @@ public partial class App : Application
             else if (args.Button == MouseButtons.Right)
                 Dispatcher.Invoke(() => _trayMenu.ShowNearTray());
         };
+    }
+
+    private void OnExportBackup()
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title      = "Export ClipMaster Backup",
+            FileName   = $"clipmaster-backup-{DateTime.Now:yyyy-MM-dd}",
+            DefaultExt = ".json",
+            Filter     = "JSON files (*.json)|*.json",
+        };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(
+                _db, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(dlg.FileName, json);
+            TraceLog.Write($"Export OK → {dlg.FileName}");
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"Export FAILED: {ex}");
+        }
     }
 
     public void ToggleWindow()
