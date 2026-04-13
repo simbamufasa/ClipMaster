@@ -22,21 +22,30 @@ public static class TraceLog
 
 public class DataService
 {
-    private static readonly string DataDir  = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster");
-    private static readonly string DataFile = Path.Combine(DataDir, "data.json");
+    private readonly string _dataDir;
+    private readonly string _dataFile;
+    private readonly string _binFile;
+    private readonly string _binTmp;
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
-
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+
+    public DataService(string? dataDir = null)
+    {
+        _dataDir  = dataDir ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster");
+        _dataFile = Path.Combine(_dataDir, "data.json");
+        _binFile  = Path.Combine(_dataDir, "data.bin");
+        _binTmp   = Path.Combine(_dataDir, "data.bin.tmp");
+    }
 
     public AppData Load()
     {
-        Directory.CreateDirectory(DataDir);
-        if (!File.Exists(DataFile)) return new AppData();
+        Directory.CreateDirectory(_dataDir);
+        if (!File.Exists(_dataFile)) return new AppData();
         try
         {
-            var json = File.ReadAllText(DataFile);
+            var json = File.ReadAllText(_dataFile);
             return JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
         }
         catch { return new AppData(); }
@@ -46,10 +55,10 @@ public class DataService
     {
         try
         {
-            Directory.CreateDirectory(DataDir);
-            var tmp = DataFile + ".tmp";
+            Directory.CreateDirectory(_dataDir);
+            var tmp = _dataFile + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(data, JsonOpts));
-            File.Move(tmp, DataFile, overwrite: true);
+            File.Move(tmp, _dataFile, overwrite: true);
         }
         catch { /* disk full or locked */ }
     }

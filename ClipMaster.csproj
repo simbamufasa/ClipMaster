@@ -14,6 +14,11 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="ClipMaster.Tests\**" />
+    <EmbeddedResource Remove="ClipMaster.Tests\**" />
+    <None Remove="ClipMaster.Tests\**" />
+  </ItemGroup>
+  <ItemGroup>
     <Resource Include="Assets\icon.ico" />
     <Resource Include="Assets\icon-32.png" />
     <Resource Include="Themes\Dark.xaml" />
