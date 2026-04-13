@@ -11,6 +11,7 @@
     <RootNamespace>ClipMaster</RootNamespace>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\icon.ico" />
