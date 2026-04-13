@@ -5,3 +5,4 @@ obj/
 .vs/
 .claude/
 installer/
+.worktrees/
