@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -60,7 +59,14 @@ public class DataService
                 var plain  = System.Security.Cryptography.ProtectedData.Unprotect(
                     cipher, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
                 var json   = System.Text.Encoding.UTF8.GetString(plain);
-                return JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+                var data   = JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+                // Deferred cleanup: remove orphaned plaintext file if migration was interrupted
+                if (File.Exists(_dataFile))
+                {
+                    try { File.Delete(_dataFile); }
+                    catch { /* best-effort */ }
+                }
+                return data;
             }
             catch (Exception ex)
             {
@@ -122,9 +128,9 @@ public class DataService
             else                      hasSymbol = true;
         }
         if (t.Length >= 8 && hasUpper && hasLower && hasDigit && hasSymbol) return true;
-        if (Regex.IsMatch(t, @"^[A-Za-z0-9+/]{20,}={0,2}$")) return true;
-        if (Regex.IsMatch(t, @"(?:password|passwd|pwd|secret|token|key|auth)[\s:=]+\S+", RegexOptions.IgnoreCase)) return true;
-        if (Regex.IsMatch(t, @"^[0-9a-f]{32,}$", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(t, @"^[A-Za-z0-9+/]{20,}={0,2}$", RegexOptions.None, RegexTimeout)) return true;
+        if (Regex.IsMatch(t, @"(?:password|passwd|pwd|secret|token|key|auth)[\s:=]+\S+", RegexOptions.IgnoreCase, RegexTimeout)) return true;
+        if (Regex.IsMatch(t, @"^[0-9a-f]{32,}$", RegexOptions.IgnoreCase, RegexTimeout)) return true;
         return false;
     }
 
