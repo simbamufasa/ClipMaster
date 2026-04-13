@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -42,13 +43,51 @@ public class DataService
     public AppData Load()
     {
         Directory.CreateDirectory(_dataDir);
-        if (!File.Exists(_dataFile)) return new AppData();
-        try
+
+        // Clean up a stale .tmp from a previously interrupted save
+        if (File.Exists(_binTmp))
         {
-            var json = File.ReadAllText(_dataFile);
-            return JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+            try { File.Delete(_binTmp); }
+            catch { /* best-effort */ }
         }
-        catch { return new AppData(); }
+
+        // Normal path: encrypted binary exists
+        if (File.Exists(_binFile))
+        {
+            try
+            {
+                var cipher = File.ReadAllBytes(_binFile);
+                var plain  = System.Security.Cryptography.ProtectedData.Unprotect(
+                    cipher, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                var json   = System.Text.Encoding.UTF8.GetString(plain);
+                return JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+            }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"Load (bin) FAILED: {ex.GetType().Name}: {ex.Message}");
+                return new AppData();
+            }
+        }
+
+        // Migration path: legacy plaintext JSON exists
+        if (File.Exists(_dataFile))
+        {
+            try
+            {
+                var json = File.ReadAllText(_dataFile);
+                var data = JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+                Save(data);
+                File.Delete(_dataFile);
+                return data;
+            }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"Load (migration) FAILED: {ex.GetType().Name}: {ex.Message}");
+                return new AppData();
+            }
+        }
+
+        return new AppData();
     }
 
     public void Save(AppData data)
@@ -56,11 +95,17 @@ public class DataService
         try
         {
             Directory.CreateDirectory(_dataDir);
-            var tmp = _dataFile + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(data, JsonOpts));
-            File.Move(tmp, _dataFile, overwrite: true);
+            var json   = JsonSerializer.Serialize(data, JsonOpts);
+            var plain  = System.Text.Encoding.UTF8.GetBytes(json);
+            var cipher = System.Security.Cryptography.ProtectedData.Protect(
+                plain, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            File.WriteAllBytes(_binTmp, cipher);
+            File.Move(_binTmp, _binFile, overwrite: true);
         }
-        catch { /* disk full or locked */ }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"Save FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     public static bool LooksLikePassword(string text)
