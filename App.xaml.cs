@@ -21,6 +21,12 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        DispatcherUnhandledException += (_, args) =>
+        {
+            TraceLog.Write($"UNHANDLED: {args.Exception}");
+            args.Handled = true;
+        };
+
         try { _db = _data.Load(); }
         catch (Exception ex)
         {
@@ -184,18 +190,7 @@ public partial class App : Application
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
         if (string.IsNullOrEmpty(text)) return;
 
-        _lastClip = text;
-        _suppressing = true;
-        try
-        {
-            Dispatcher.Invoke(() =>
-            {
-                System.Windows.Clipboard.SetText(text);
-                _window?.Hide();
-            });
-        }
-        finally { _suppressing = false; }
-
+        if (!TrySetClipboardAndHide(text)) return;
         Task.Run(() => PasteService.Paste(150));
     }
 
@@ -207,19 +202,41 @@ public partial class App : Application
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
         if (string.IsNullOrEmpty(text)) return;
 
+        if (!TrySetClipboardAndHide(text)) return;
+        Task.Run(() => PasteService.Paste(150));
+    }
+
+    private bool TrySetClipboardAndHide(string text)
+    {
         _lastClip = text;
         _suppressing = true;
         try
         {
             Dispatcher.Invoke(() =>
             {
-                System.Windows.Clipboard.SetText(text);
-                _window?.Hide();
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    try
+                    {
+                        System.Windows.Clipboard.SetText(text);
+                        _window?.Hide();
+                        return;
+                    }
+                    catch (System.Runtime.InteropServices.COMException)
+                    {
+                        if (attempt < 4) Thread.Sleep(30);
+                    }
+                }
+                TraceLog.Write("SetText failed after 5 attempts — clipboard locked");
             });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"TrySetClipboardAndHide FAILED: {ex}");
+            return false;
         }
         finally { _suppressing = false; }
-
-        Task.Run(() => PasteService.Paste(150));
     }
 
     private void Quit()
