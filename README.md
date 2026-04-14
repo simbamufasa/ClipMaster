@@ -8,7 +8,7 @@ The killer feature: **regex-based transform rules** that automatically rewrite t
 
 ## Download
 
-**[ClipMaster-Setup-1.0.0.exe](https://github.com/simbamufasa/ClipMaster/releases/latest/download/ClipMaster-Setup-1.0.0.exe)** — single installer, no dependencies required.
+**[ClipMaster-Setup-1.1.0.exe](https://github.com/simbamufasa/ClipMaster/releases/latest/download/ClipMaster-Setup-1.1.0.exe)** — single installer, no dependencies required.
 
 ## Features
 
@@ -35,8 +35,18 @@ ClipMaster auto-detects passwords, tokens, API keys, and hex strings on the clip
 ### Paste Simulation
 Select a clip and ClipMaster copies it to your clipboard, hides the window, and simulates `Ctrl+V` in whatever app has focus — one-step paste from history.
 
+### Encrypted Storage
+Clipboard history is encrypted at rest using **Windows DPAPI** (`CurrentUser` scope). The data file on disk is opaque binary — unreadable by other user accounts, other processes, or anyone with physical access to the drive. No passwords or prompts; the key is derived transparently from your Windows login.
+
+On first launch after upgrading from v1.0.0, the existing `data.json` is silently migrated to the encrypted format and the plaintext file is deleted.
+
+### Export Backup
+Right-click the tray icon and choose **Export backup…** to save a portable plain-JSON copy of your clipboard history to any location you choose. Useful for migration or manual backups.
+
+> **Note:** The export file is unencrypted plain text. If your history contains sensitive entries (detected passwords or tokens), ClipMaster will warn you before writing the file.
+
 ### System Tray
-ClipMaster lives in the tray. Left-click the icon to toggle the window; right-click for a context menu.
+ClipMaster lives in the tray. Left-click the icon to toggle the window; right-click for a context menu with Show, Export backup, and Quit.
 
 ### Run on Startup
 Optional Windows startup registration via the registry `Run` key, configurable from Settings or during install.
@@ -85,7 +95,7 @@ Requires [Inno Setup 6](https://jrsoftware.org/isdl.php):
 iscc installer.iss
 ```
 
-Output: `installer/ClipMaster-Setup-1.0.0.exe`
+Output: `installer/ClipMaster-Setup-1.1.0.exe`
 
 ## Data Storage
 
@@ -93,8 +103,10 @@ All data is stored in `%USERPROFILE%\.clipmaster\`:
 
 | File | Contents |
 |------|----------|
-| `data.json` | Clips, rules, tags, and settings |
-| `debug.log` | Diagnostic trace log |
+| `data.bin` | Clips, rules, tags, and settings — encrypted with Windows DPAPI |
+| `debug.log` | Diagnostic trace log (plaintext, no clipboard content) |
+
+> The data file is tied to your Windows user account. It cannot be read on another machine or by another user. Use **Export backup…** from the tray menu to produce a portable plain-JSON copy.
 
 ## Project Structure
 
@@ -106,7 +118,7 @@ ClipMaster/
 ├── HotkeyService.cs       Win32 global hotkey registration
 ├── PasteService.cs        Ctrl+V simulation via SendInput
 ├── StartupService.cs      Registry Run key management
-├── DataService.cs         JSON persistence, regex engine, password detection
+├── DataService.cs         Encrypted persistence (DPAPI), regex engine, password detection
 ├── RuleDialog.xaml.cs     Rule editor with live preview
 ├── TagDialog.xaml.cs      Tag management dialog
 ├── TrayMenu.xaml.cs       System tray context menu
@@ -119,7 +131,8 @@ ClipMaster/
 
 - **WPF** (.NET 8, C#) — UI framework
 - **Win32 Interop** — clipboard monitoring (`AddClipboardFormatListener`), global hotkeys (`RegisterHotKey`), paste simulation (`SendInput`)
-- **System.Text.Json** — data persistence
+- **System.Text.Json** — data serialisation
+- **Windows DPAPI** (`System.Security.Cryptography.ProtectedData`) — at-rest encryption
 - **Inno Setup** — installer
 
 ## License
