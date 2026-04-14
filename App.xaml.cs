@@ -49,7 +49,7 @@ public partial class App : Application
                 _hotkey.Attach(_window);
 
                 _clip.NewClipText    += OnNewClip;
-                _clip.NewClipImage   += OnNewClipImage;   // ← add this line
+                _clip.NewClipImage   += OnNewClipImage;
                 _hotkey.HotkeyPressed += ToggleWindow;
 
                 // Register hotkey; fall back if taken
@@ -187,12 +187,18 @@ public partial class App : Application
     private void OnNewClipImage(BitmapSource image)
     {
         if (_suppressing) return;
-        var entry = _data.AddImageClip(_db, image);
-        if (entry == null) return;
-        Dispatcher.Invoke(() =>
+        // Freeze before crossing the thread boundary — BitmapSource is a DispatcherObject
+        // and cannot be accessed from a non-owning thread without freezing first.
+        if (image.CanFreeze) image.Freeze();
+        Task.Run(() =>
         {
-            if (_window?.IsVisible == true)
-                _window.RefreshClips(_db.Clips);
+            var entry = _data.AddImageClip(_db, image);
+            if (entry == null) return;
+            Dispatcher.Invoke(() =>
+            {
+                if (_window?.IsVisible == true)
+                    _window.RefreshClips(_db.Clips);
+            });
         });
     }
 
@@ -223,7 +229,7 @@ public partial class App : Application
 
     public void OnPasteImageClip(string clipId)
     {
-        var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId);
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId && c.IsImage);
         if (clip?.ImagePath == null) return;
         if (!TrySetClipboardImageAndHide(clip.ImagePath)) return;
         Task.Run(() => PasteService.Paste(150));
@@ -231,7 +237,7 @@ public partial class App : Application
 
     public void OnCopyImageClip(string clipId)
     {
-        var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId);
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId && c.IsImage);
         if (clip?.ImagePath == null) return;
         try
         {
@@ -281,38 +287,42 @@ public partial class App : Application
 
     private bool TrySetClipboardImageAndHide(string relPath)
     {
-        _suppressing = true;
         try
         {
             var abs = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ".clipmaster", relPath);
             var bmp = new BitmapImage(new Uri(abs));
+            var success = false;
             Dispatcher.Invoke(() =>
             {
                 for (int attempt = 0; attempt < 5; attempt++)
                 {
                     try
                     {
+                        _suppressing = true;
                         System.Windows.Clipboard.SetImage(bmp);
                         _window?.Hide();
+                        success = true;
                         return;
                     }
                     catch (System.Runtime.InteropServices.COMException)
                     {
+                        _suppressing = false;
                         if (attempt < 4) Thread.Sleep(30);
                     }
                 }
                 TraceLog.Write("SetImage failed after 5 attempts — clipboard locked");
             });
-            return true;
+            if (!success) _suppressing = false;
+            return success;
         }
         catch (Exception ex)
         {
+            _suppressing = false;
             TraceLog.Write($"TrySetClipboardImageAndHide FAILED: {ex}");
             return false;
         }
-        finally { _suppressing = false; }
     }
 
     private void Quit()
