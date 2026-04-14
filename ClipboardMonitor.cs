@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 
 namespace ClipMaster;
 
@@ -11,7 +12,8 @@ public class ClipboardMonitor : IDisposable
     [DllImport("user32.dll")] private static extern bool AddClipboardFormatListener(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
-    public event Action<string>? NewClipText;
+    public event Action<string>?       NewClipText;
+    public event Action<BitmapSource>? NewClipImage;
 
     private HwndSource? _source;
     private IntPtr      _hwnd;
@@ -42,6 +44,13 @@ public class ClipboardMonitor : IDisposable
                         if (!string.IsNullOrEmpty(text))
                             NewClipText?.Invoke(text);
                     }
+                    else
+                    {
+                        // Text takes priority. Only check for images when no text is present.
+                        var image = TryGetClipboardImage();
+                        if (image != null)
+                            NewClipImage?.Invoke(image);
+                    }
                     break;
                 }
                 catch (COMException)
@@ -53,6 +62,33 @@ public class ClipboardMonitor : IDisposable
             }
         }
         return IntPtr.Zero;
+    }
+
+    private static BitmapSource? TryGetClipboardImage()
+    {
+        // Prefer the "PNG" registered format — lossless, alpha preserved.
+        // Used by Chrome, Edge, and Win+Shift+S Snipping Tool.
+        // Let COMException propagate so the WndProc retry loop can handle it.
+        if (System.Windows.Clipboard.ContainsData("PNG"))
+        {
+            var stream = System.Windows.Clipboard.GetData("PNG") as System.IO.MemoryStream;
+            if (stream != null)
+            {
+                try
+                {
+                    var decoder = new PngBitmapDecoder(
+                        stream,
+                        BitmapCreateOptions.PreservePixelFormat,
+                        BitmapCacheOption.OnLoad);
+                    return decoder.Frames[0];
+                }
+                catch { /* PNG decode failed — fall through to CF_DIB */ }
+            }
+        }
+        // Fall back to CF_DIB (universal fallback — Print Screen, most apps)
+        if (System.Windows.Clipboard.ContainsImage())
+            return System.Windows.Clipboard.GetImage();
+        return null;
     }
 
     public void Dispose()
