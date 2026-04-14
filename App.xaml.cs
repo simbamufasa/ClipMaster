@@ -20,6 +20,7 @@ public partial class App : Application
     private AppData _db = new();
     private string  _lastClip = "";
     private bool    _suppressing;   // prevents re-entrant clipboard handling
+    private long    _lastImageCapture;  // ms timestamp — debounces duplicate WM_CLIPBOARDUPDATE from Snipping Tool
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -225,6 +226,11 @@ public partial class App : Application
     private void OnNewClipImage(BitmapSource image)
     {
         if (_suppressing) return;
+
+        // Snipping Tool fires WM_CLIPBOARDUPDATE twice in quick succession — deduplicate.
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (now - _lastImageCapture < 500) return;
+        _lastImageCapture = now;
 
         // Encode to bytes on the UI thread — BitmapSource is a DispatcherObject and
         // cannot be safely passed to a background thread even when frozen.
