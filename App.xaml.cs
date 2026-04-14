@@ -1,6 +1,8 @@
 using System.Drawing;
+using System.IO;
 using System.Windows;
 using System.Windows.Forms;
+using System.Windows.Media.Imaging;
 using Application = System.Windows.Application;
 
 namespace ClipMaster;
@@ -47,6 +49,7 @@ public partial class App : Application
                 _hotkey.Attach(_window);
 
                 _clip.NewClipText    += OnNewClip;
+                _clip.NewClipImage   += OnNewClipImage;   // ← add this line
                 _hotkey.HotkeyPressed += ToggleWindow;
 
                 // Register hotkey; fall back if taken
@@ -181,6 +184,18 @@ public partial class App : Application
         });
     }
 
+    private void OnNewClipImage(BitmapSource image)
+    {
+        if (_suppressing) return;
+        var entry = _data.AddImageClip(_db, image);
+        if (entry == null) return;
+        Dispatcher.Invoke(() =>
+        {
+            if (_window?.IsVisible == true)
+                _window.RefreshClips(_db.Clips);
+        });
+    }
+
     public void OnPasteAndPromote(string clipId)
     {
         var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId);
@@ -204,6 +219,31 @@ public partial class App : Application
 
         if (!TrySetClipboardAndHide(text)) return;
         Task.Run(() => PasteService.Paste(150));
+    }
+
+    public void OnPasteImageClip(string clipId)
+    {
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId);
+        if (clip?.ImagePath == null) return;
+        if (!TrySetClipboardImageAndHide(clip.ImagePath)) return;
+        Task.Run(() => PasteService.Paste(150));
+    }
+
+    public void OnCopyImageClip(string clipId)
+    {
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId);
+        if (clip?.ImagePath == null) return;
+        try
+        {
+            var abs = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".clipmaster", clip.ImagePath);
+            var bmp = new BitmapImage(new Uri(abs));
+            _suppressing = true;
+            try { Dispatcher.Invoke(() => System.Windows.Clipboard.SetImage(bmp)); }
+            finally { _suppressing = false; }
+        }
+        catch (Exception ex) { TraceLog.Write($"OnCopyImageClip FAILED: {ex}"); }
     }
 
     private bool TrySetClipboardAndHide(string text)
@@ -234,6 +274,42 @@ public partial class App : Application
         catch (Exception ex)
         {
             TraceLog.Write($"TrySetClipboardAndHide FAILED: {ex}");
+            return false;
+        }
+        finally { _suppressing = false; }
+    }
+
+    private bool TrySetClipboardImageAndHide(string relPath)
+    {
+        _suppressing = true;
+        try
+        {
+            var abs = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".clipmaster", relPath);
+            var bmp = new BitmapImage(new Uri(abs));
+            Dispatcher.Invoke(() =>
+            {
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    try
+                    {
+                        System.Windows.Clipboard.SetImage(bmp);
+                        _window?.Hide();
+                        return;
+                    }
+                    catch (System.Runtime.InteropServices.COMException)
+                    {
+                        if (attempt < 4) Thread.Sleep(30);
+                    }
+                }
+                TraceLog.Write("SetImage failed after 5 attempts — clipboard locked");
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"TrySetClipboardImageAndHide FAILED: {ex}");
             return false;
         }
         finally { _suppressing = false; }
