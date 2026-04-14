@@ -76,11 +76,15 @@ public class ClipboardMonitor : IDisposable
             {
                 try
                 {
-                    var decoder = new PngBitmapDecoder(
-                        stream,
-                        BitmapCreateOptions.PreservePixelFormat,
-                        BitmapCacheOption.OnLoad);
-                    return decoder.Frames[0];
+                    stream.Position = 0;   // reset — GetData("PNG") may return stream at end
+                    using (stream)
+                    {
+                        var decoder = new PngBitmapDecoder(
+                            stream,
+                            BitmapCreateOptions.PreservePixelFormat,
+                            BitmapCacheOption.OnLoad);
+                        return decoder.Frames[0];
+                    }
                 }
                 catch { /* PNG decode failed — fall through to CF_DIB */ }
             }
