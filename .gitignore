@@ -6,3 +6,4 @@ obj/
 .claude/
 installer/
 .worktrees/
+.superpowers/
