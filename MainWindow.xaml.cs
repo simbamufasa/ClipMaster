@@ -940,6 +940,12 @@ public partial class MainWindow : Window
         addTagRow.Children.Add(addTagBtn);
         SettingsForm.Children.Add(addTagRow);
 
+        // Images
+        SectionHeader("IMAGES");
+
+        var maxImgBox = StyledInput(s.MaxImageHistory.ToString(), 80);
+        SettingRow("Max image history", "Image clips to keep on disk", maxImgBox);
+
         // Data
         SectionHeader("DATA");
 
@@ -952,6 +958,9 @@ public partial class MainWindow : Window
                 if (WpfMessageBox.Show("Clear all unpinned history? Cannot be undone.",
                     "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
                 {
+                    var imagesToDelete = _db.Clips.Where(c => !c.Pinned && c.IsImage).ToList();
+                    foreach (var img in imagesToDelete)
+                        _svc.DeleteImageFile(img.ImagePath);
                     _db.Clips = _db.Clips.Where(c => c.Pinned).ToList();
                     _svc.Save(_db);
                     RenderStack();
@@ -970,11 +979,13 @@ public partial class MainWindow : Window
         };
         saveBtn.Click += (_, _) =>
         {
-            s.Hotkey         = hotkeyBox.Text.Trim();
-            s.MaxHistory     = int.TryParse(maxBox.Text, out var m) ? m : 500;
-            s.MaskPasswords  = maskCb.IsChecked == true;
-            s.AutoApplyRules = autoRulesCb.IsChecked == true;
-            s.RunOnStartup   = startupCb.IsChecked == true;
+            s.Hotkey          = hotkeyBox.Text.Trim();
+            s.MaxHistory      = int.TryParse(maxBox.Text, out var m) ? m : 500;
+            s.MaskPasswords   = maskCb.IsChecked == true;
+            s.AutoApplyRules  = autoRulesCb.IsChecked == true;
+            s.RunOnStartup    = startupCb.IsChecked == true;
+            s.MaxImageHistory = int.TryParse(maxImgBox.Text, out var mi) ? Math.Max(1, mi) : 50;
+            _svc.PruneImageHistory(_db);
             _svc.Save(_db);
             ((App)WpfApp.Current).RehostHotkey(s.Hotkey);
             StartupService.SetRunOnStartup(s.RunOnStartup);
