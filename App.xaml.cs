@@ -294,32 +294,33 @@ public partial class App : Application
                 ".clipmaster", relPath);
             var bmp = new BitmapImage(new Uri(abs));
             var success = false;
-            Dispatcher.Invoke(() =>
+            _suppressing = true;
+            try
             {
-                for (int attempt = 0; attempt < 5; attempt++)
+                Dispatcher.Invoke(() =>
                 {
-                    try
+                    for (int attempt = 0; attempt < 5; attempt++)
                     {
-                        _suppressing = true;
-                        System.Windows.Clipboard.SetImage(bmp);
-                        _window?.Hide();
-                        success = true;
-                        return;
+                        try
+                        {
+                            System.Windows.Clipboard.SetImage(bmp);
+                            _window?.Hide();
+                            success = true;
+                            return;
+                        }
+                        catch (System.Runtime.InteropServices.COMException)
+                        {
+                            if (attempt < 4) Thread.Sleep(30);
+                        }
                     }
-                    catch (System.Runtime.InteropServices.COMException)
-                    {
-                        _suppressing = false;
-                        if (attempt < 4) Thread.Sleep(30);
-                    }
-                }
-                TraceLog.Write("SetImage failed after 5 attempts — clipboard locked");
-            });
-            if (!success) _suppressing = false;
+                    TraceLog.Write("SetImage failed after 5 attempts — clipboard locked");
+                });
+            }
+            finally { _suppressing = false; }
             return success;
         }
         catch (Exception ex)
         {
-            _suppressing = false;
             TraceLog.Write($"TrySetClipboardImageAndHide FAILED: {ex}");
             return false;
         }
