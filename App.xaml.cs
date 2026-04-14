@@ -225,12 +225,29 @@ public partial class App : Application
     private void OnNewClipImage(BitmapSource image)
     {
         if (_suppressing) return;
-        // Freeze before crossing the thread boundary — BitmapSource is a DispatcherObject
-        // and cannot be accessed from a non-owning thread without freezing first.
-        if (image.CanFreeze) image.Freeze();
+
+        // Encode to bytes on the UI thread — BitmapSource is a DispatcherObject and
+        // cannot be safely passed to a background thread even when frozen.
+        byte[] pngBytes;
+        int w = image.PixelWidth, h = image.PixelHeight;
+        try
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(image));
+            using var ms = new MemoryStream();
+            encoder.Save(ms);
+            pngBytes = ms.ToArray();
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"OnNewClipImage encode FAILED: {ex.GetType().Name}: {ex.Message}");
+            return;
+        }
+
+        // Hand off only the raw bytes to the background thread for disk I/O.
         Task.Run(() =>
         {
-            var entry = _data.AddImageClip(_db, image);
+            var entry = _data.AddImageClip(_db, pngBytes, w, h);
             if (entry == null) return;
             Dispatcher.Invoke(() =>
             {

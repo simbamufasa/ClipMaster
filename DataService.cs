@@ -1,7 +1,6 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Windows.Media.Imaging;
 
 namespace ClipMaster;
 
@@ -143,21 +142,11 @@ public class DataService
         }
     }
 
-    public ClipEntry? AddImageClip(AppData data, BitmapSource image)
+    public ClipEntry? AddImageClip(AppData data, byte[] pngBytes, int width, int height)
     {
         try
         {
             Directory.CreateDirectory(_imagesDir);
-
-            // Encode BitmapSource → PNG bytes
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(image));
-            byte[] bytes;
-            using (var ms = new System.IO.MemoryStream())
-            {
-                encoder.Save(ms);
-                bytes = ms.ToArray();
-            }
 
             var id      = $"img_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{Random.Shared.Next(10000, 99999)}";
             var relPath = $"images/{id}.png";
@@ -165,7 +154,7 @@ public class DataService
             var tmpPath = absPath + ".tmp";
 
             // Atomic write: write to .tmp then rename
-            File.WriteAllBytes(tmpPath, bytes);
+            File.WriteAllBytes(tmpPath, pngBytes);
             File.Move(tmpPath, absPath, overwrite: true);
 
             var entry = new ClipEntry
@@ -173,9 +162,9 @@ public class DataService
                 Id          = id,
                 IsImage     = true,
                 ImagePath   = relPath,
-                ImageWidth  = image.PixelWidth,
-                ImageHeight = image.PixelHeight,
-                ImageBytes  = bytes.LongLength,
+                ImageWidth  = width,
+                ImageHeight = height,
+                ImageBytes  = pngBytes.LongLength,
                 CopiedAt    = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 CopyCount   = 1,
             };
