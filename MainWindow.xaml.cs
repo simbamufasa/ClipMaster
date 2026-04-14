@@ -1,8 +1,10 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 // Aliases to resolve WPF vs WinForms ambiguity (project uses both)
@@ -186,9 +188,11 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(_search))
         {
             var q = _search.ToLowerInvariant();
+            // Image clips have no text content — hide them entirely during search
             clips = clips.Where(c =>
-                c.Text.ToLowerInvariant().Contains(q) ||
-                c.Raw.ToLowerInvariant().Contains(q));
+                !c.IsImage &&
+                (c.Text.ToLowerInvariant().Contains(q) ||
+                 c.Raw.ToLowerInvariant().Contains(q)));
         }
         var list     = clips.ToList();
         var pinned   = list.Where(c => c.Pinned).ToList();
@@ -203,7 +207,12 @@ public partial class MainWindow : Window
         ClipList.Children.Clear();
         var clips = GetFilteredClips();
         for (int i = 0; i < clips.Count; i++)
-            ClipList.Children.Add(BuildClipCard(clips[i], i + 1));
+        {
+            var card = clips[i].IsImage
+                ? BuildImageCard(clips[i], i + 1)
+                : BuildClipCard(clips[i], i + 1);
+            ClipList.Children.Add(card);
+        }
         RenderTagFilterChips();
     }
 
@@ -427,6 +436,193 @@ public partial class MainWindow : Window
             menu.Items.Add(MI("Manage tags…", () => OpenTagDialog(clip)));
             menu.Items.Add(new Separator());
             menu.Items.Add(MI("Delete",       () => { _db.Clips.Remove(clip); _svc.Save(_db); RenderStack(); }));
+            card.ContextMenu = menu;
+            menu.IsOpen      = true;
+        };
+
+        return card;
+    }
+
+    private UIElement BuildImageCard(ClipEntry clip, int rank)
+    {
+        double opacity = rank switch { 1 => 1.0, 2 => 0.85, 3 => 0.70, _ => 0.55 };
+        string rankBg  = rank switch { 1 => "#7c6af7", 2 => "#5548aa", 3 => "#3d3880", _ => "#2a2460" };
+
+        // Rank badge
+        var rankBadge = new Border
+        {
+            Style      = (Style)FindResource("RankBadge"),
+            Background = BrushFromHex(rankBg),
+            Child      = new TextBlock
+            {
+                Text                = rank.ToString(),
+                FontSize            = 10,
+                FontWeight          = FontWeights.Bold,
+                Foreground          = WpfBrushes.White,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                VerticalAlignment   = VerticalAlignment.Center,
+            },
+        };
+
+        // Badges row
+        var badgesPanel = new StackPanel
+        {
+            Orientation       = WpfOrientation.Horizontal,
+            Margin            = new Thickness(6, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        badgesPanel.Children.Add(MakeBadge("image", "#1a2e3a", "#5bb8d4"));
+        if (clip.Pinned) badgesPanel.Children.Add(MakeBadge("pinned", "#3d3880", "#a89ef7"));
+
+        var metaTb = new TextBlock
+        {
+            Text              = TimeAgo(clip.CopiedAt),
+            FontSize          = 10,
+            Foreground        = (WpfBrush)FindResource("Text3Brush"),
+            Margin            = new Thickness(6, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var header = new StackPanel
+        {
+            Orientation = WpfOrientation.Horizontal,
+            Margin      = new Thickness(0, 0, 0, 8),
+        };
+        header.Children.Add(rankBadge);
+        header.Children.Add(badgesPanel);
+        header.Children.Add(metaTb);
+
+        // Thumbnail — loaded with DecodePixelWidth so WPF only decodes a scaled version
+        System.Windows.Controls.Image thumbnail;
+        if (clip.ImagePath != null)
+        {
+            var abs = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".clipmaster", clip.ImagePath);
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.UriSource        = new Uri(abs);
+            bmp.DecodePixelWidth = 420;
+            bmp.CacheOption      = BitmapCacheOption.OnLoad;
+            bmp.EndInit();
+            thumbnail = new System.Windows.Controls.Image
+            {
+                Source              = bmp,
+                Height              = 140,
+                Stretch             = System.Windows.Media.Stretch.UniformToFill,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+            };
+        }
+        else
+        {
+            thumbnail = new System.Windows.Controls.Image { Height = 140 };
+        }
+
+        var thumbBorder = new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            ClipToBounds = true,
+            Margin       = new Thickness(0, 0, 0, 8),
+            Child        = thumbnail,
+        };
+
+        // Action buttons
+        var pasteBtn = CardBtn("Paste", "PasteBtn");
+        var copyBtn  = CardBtn("Copy",  "ActionBtn");
+        var pinBtn   = CardBtn(clip.Pinned ? "Unpin" : "Pin", "ActionBtn");
+        var tagBtn   = CardBtn("Tag",   "ActionBtn");
+        var delBtn   = CardBtn("✕",     "DangerBtn");
+
+        pasteBtn.Click += (_, _) => ((App)WpfApp.Current).OnPasteImageClip(clip.Id);
+        copyBtn.Click  += (_, _) =>
+        {
+            ((App)WpfApp.Current).OnCopyImageClip(clip.Id);
+            ShowToast("Copied");
+        };
+        pinBtn.Click += (_, _) =>
+        {
+            clip.Pinned = !clip.Pinned;
+            _svc.Save(_db);
+            RenderStack();
+        };
+        tagBtn.Click += (_, _) => OpenTagDialog(clip);
+        delBtn.Click += (_, _) =>
+        {
+            _db.Clips.Remove(clip);
+            _svc.DeleteImageFile(clip.ImagePath);
+            _svc.Save(_db);
+            RenderStack();
+        };
+
+        var actionsPanel = new StackPanel { Orientation = WpfOrientation.Horizontal };
+        actionsPanel.Children.Add(pasteBtn);
+        actionsPanel.Children.Add(copyBtn);
+        actionsPanel.Children.Add(pinBtn);
+        actionsPanel.Children.Add(tagBtn);
+        actionsPanel.Children.Add(delBtn);
+
+        // Dimensions / size label
+        var sizeLabel = clip.ImageBytes >= 1_048_576
+            ? $"{clip.ImageBytes / 1_048_576.0:F1} MB"
+            : $"{clip.ImageBytes / 1024.0:F0} KB";
+        var dimLabel = new TextBlock
+        {
+            Text              = $"{clip.ImageWidth} × {clip.ImageHeight} · PNG · {sizeLabel}",
+            FontSize          = 9,
+            Foreground        = (WpfBrush)FindResource("Text3Brush"),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        // Footer: actions left, dimensions right
+        var footer = new DockPanel { LastChildFill = false };
+        DockPanel.SetDock(dimLabel, Dock.Right);
+        footer.Children.Add(actionsPanel);
+        footer.Children.Add(dimLabel);
+
+        var cardContent = new StackPanel();
+        cardContent.Children.Add(header);
+        cardContent.Children.Add(thumbBorder);
+        cardContent.Children.Add(footer);
+
+        var card = new Border
+        {
+            Style   = (Style)FindResource("ClipCard"),
+            Opacity = opacity,
+            Child   = cardContent,
+        };
+
+        card.MouseEnter += (_, _) => card.Background = BrushFromHex("#282828");
+        card.MouseLeave += (_, _) => card.Background = (WpfBrush)FindResource("SurfaceBrush");
+
+        // Double-click on card body → paste
+        card.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ClickCount == 2 && e.OriginalSource is not WpfButton)
+                ((App)WpfApp.Current).OnPasteImageClip(clip.Id);
+        };
+
+        // Right-click context menu
+        card.MouseRightButtonUp += (_, _) =>
+        {
+            var menu = new ContextMenu();
+            MenuItem MI(string hdr, Action action)
+            {
+                var mi = new MenuItem { Header = hdr };
+                mi.Click += (_, _) => action();
+                return mi;
+            }
+            menu.Items.Add(MI("Paste", () => ((App)WpfApp.Current).OnPasteImageClip(clip.Id)));
+            menu.Items.Add(MI("Copy",  () => { ((App)WpfApp.Current).OnCopyImageClip(clip.Id); ShowToast("Copied"); }));
+            menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.Save(_db); RenderStack(); }));
+            menu.Items.Add(MI("Manage tags…", () => OpenTagDialog(clip)));
+            menu.Items.Add(new Separator());
+            menu.Items.Add(MI("Delete", () =>
+            {
+                _db.Clips.Remove(clip);
+                _svc.DeleteImageFile(clip.ImagePath);
+                _svc.Save(_db);
+                RenderStack();
+            }));
             card.ContextMenu = menu;
             menu.IsOpen      = true;
         };
