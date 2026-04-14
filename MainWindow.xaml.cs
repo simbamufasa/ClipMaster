@@ -499,19 +499,27 @@ public partial class MainWindow : Window
             var abs = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ".clipmaster", clip.ImagePath);
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.UriSource        = new Uri(abs);
-            bmp.DecodePixelWidth = 420;
-            bmp.CacheOption      = BitmapCacheOption.OnLoad;
-            bmp.EndInit();
-            thumbnail = new System.Windows.Controls.Image
+            try
             {
-                Source              = bmp,
-                Height              = 140,
-                Stretch             = System.Windows.Media.Stretch.UniformToFill,
-                HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
-            };
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.UriSource        = new Uri(abs);
+                bmp.DecodePixelWidth = 420;
+                bmp.CacheOption      = BitmapCacheOption.OnLoad;
+                bmp.EndInit();
+                bmp.Freeze();
+                thumbnail = new System.Windows.Controls.Image
+                {
+                    Source              = bmp,
+                    Height              = 140,
+                    Stretch             = System.Windows.Media.Stretch.UniformToFill,
+                    HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+                };
+            }
+            catch
+            {
+                thumbnail = new System.Windows.Controls.Image { Height = 140 };
+            }
         }
         else
         {
@@ -549,8 +557,8 @@ public partial class MainWindow : Window
         delBtn.Click += (_, _) =>
         {
             _db.Clips.Remove(clip);
-            _svc.DeleteImageFile(clip.ImagePath);
             _svc.Save(_db);
+            _svc.DeleteImageFile(clip.ImagePath);
             RenderStack();
         };
 
@@ -576,8 +584,8 @@ public partial class MainWindow : Window
         // Footer: actions left, dimensions right
         var footer = new DockPanel { LastChildFill = false };
         DockPanel.SetDock(dimLabel, Dock.Right);
-        footer.Children.Add(actionsPanel);
         footer.Children.Add(dimLabel);
+        footer.Children.Add(actionsPanel);
 
         var cardContent = new StackPanel();
         cardContent.Children.Add(header);
@@ -619,8 +627,8 @@ public partial class MainWindow : Window
             menu.Items.Add(MI("Delete", () =>
             {
                 _db.Clips.Remove(clip);
-                _svc.DeleteImageFile(clip.ImagePath);
                 _svc.Save(_db);
+                _svc.DeleteImageFile(clip.ImagePath);
                 RenderStack();
             }));
             card.ContextMenu = menu;
