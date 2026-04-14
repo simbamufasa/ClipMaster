@@ -8,16 +8,18 @@ The killer feature: **regex-based transform rules** that automatically rewrite t
 
 ## Download
 
-**[ClipMaster-Setup-1.1.0.exe](https://github.com/simbamufasa/ClipMaster/releases/latest/download/ClipMaster-Setup-1.1.0.exe)** — single installer, no dependencies required.
+**[ClipMaster-Setup-1.2.0.exe](https://github.com/simbamufasa/ClipMaster/releases/latest/download/ClipMaster-Setup-1.2.0.exe)** — single installer, no dependencies required.
 
 ## Features
 
 ### Clipboard History
 - Monitors the clipboard in real time and keeps a searchable, scrollable history
-- Configurable history size (default: 500 entries)
+- Captures both **text** and **images** (screenshots, browser image copies, any app)
+- Configurable history size — text and images have independent caps (defaults: 500 / 50)
 - Duplicates are automatically promoted to the top with an incremented copy count
 - Pin important clips so they never get pruned
 - Tag clips for quick filtering
+- Image clips are hidden during text search and shown again when the search is cleared
 
 ### Regex Transform Rules
 Define regex find-and-replace rules that run on every copy (or on demand):
@@ -32,8 +34,17 @@ Rules support global (`g`), case-insensitive (`i`), and multiline (`m`) flags. A
 ### Sensitive Content Masking
 ClipMaster auto-detects passwords, tokens, API keys, and hex strings on the clipboard and masks them in the UI. Hover to reveal. Toggle this in Settings.
 
+### Image Clips
+When you copy an image — via Win+Shift+S (Snipping Tool), Print Screen, or right-clicking an image in a browser — ClipMaster captures it and shows a 140 px thumbnail card in the stack alongside your text clips.
+
+- **Paste** puts the image on the clipboard and simulates Ctrl+V in the focused app
+- **Copy** puts the image on the clipboard without closing the window
+- Image clips are stored as PNGs in `~/.clipmaster/images/` and persist across restarts
+- Dimensions, format, and file size are shown on each card (`1920 × 1080 · PNG · 2.1 MB`)
+- Text takes priority: if the clipboard contains both text and an image (e.g. Excel cells), the text is captured
+
 ### Paste Simulation
-Select a clip and ClipMaster copies it to your clipboard, hides the window, and simulates `Ctrl+V` in whatever app has focus — one-step paste from history.
+Select any clip and ClipMaster copies it to your clipboard, hides the window, and simulates `Ctrl+V` in whatever app has focus — one-step paste from history. Works for both text and image clips.
 
 ### Encrypted Storage
 Clipboard history is encrypted at rest using **Windows DPAPI** (`CurrentUser` scope). The data file on disk is opaque binary — unreadable by other user accounts, other processes, or anyone with physical access to the drive. No passwords or prompts; the key is derived transparently from your Windows login.
@@ -95,15 +106,16 @@ Requires [Inno Setup 6](https://jrsoftware.org/isdl.php):
 iscc installer.iss
 ```
 
-Output: `installer/ClipMaster-Setup-1.1.0.exe`
+Output: `installer/ClipMaster-Setup-1.2.0.exe`
 
 ## Data Storage
 
 All data is stored in `%USERPROFILE%\.clipmaster\`:
 
-| File | Contents |
+| Path | Contents |
 |------|----------|
 | `data.bin` | Clips, rules, tags, and settings — encrypted with Windows DPAPI |
+| `images/<id>.png` | One PNG file per captured image clip |
 | `debug.log` | Diagnostic trace log (plaintext, no clipboard content) |
 
 > The data file is tied to your Windows user account. It cannot be read on another machine or by another user. Use **Export backup…** from the tray menu to produce a portable plain-JSON copy.
@@ -112,17 +124,18 @@ All data is stored in `%USERPROFILE%\.clipmaster\`:
 
 ```
 ClipMaster/
-├── App.xaml.cs            Main app — tray, hotkey, clipboard wiring
-├── MainWindow.xaml.cs     UI — Stack, Rules, Settings tabs
-├── ClipboardMonitor.cs    Win32 clipboard listener
+├── App.xaml.cs            Main app — tray, hotkey, clipboard wiring, image capture
+├── MainWindow.xaml.cs     UI — Stack, Rules, Settings tabs; image card rendering
+├── ClipboardMonitor.cs    Win32 clipboard listener; PNG-first image detection
 ├── HotkeyService.cs       Win32 global hotkey registration
 ├── PasteService.cs        Ctrl+V simulation via SendInput
 ├── StartupService.cs      Registry Run key management
-├── DataService.cs         Encrypted persistence (DPAPI), regex engine, password detection
+├── DataService.cs         Encrypted persistence (DPAPI), image storage, regex engine
 ├── RuleDialog.xaml.cs     Rule editor with live preview
 ├── TagDialog.xaml.cs      Tag management dialog
 ├── TrayMenu.xaml.cs       System tray context menu
-├── Models.cs              Data models
+├── Models.cs              Data models (ClipEntry, AppSettings)
+├── ClipMaster.Tests/      xUnit tests for DataService (encryption, storage)
 ├── Themes/Dark.xaml       Dark theme resources
 └── Assets/                Icons and installer images
 ```
@@ -131,8 +144,10 @@ ClipMaster/
 
 - **WPF** (.NET 8, C#) — UI framework
 - **Win32 Interop** — clipboard monitoring (`AddClipboardFormatListener`), global hotkeys (`RegisterHotKey`), paste simulation (`SendInput`)
+- **System.Windows.Media.Imaging** — PNG capture (`PngBitmapDecoder`/`PngBitmapEncoder`), thumbnail rendering (`BitmapImage` with `DecodePixelWidth`)
 - **System.Text.Json** — data serialisation
 - **Windows DPAPI** (`System.Security.Cryptography.ProtectedData`) — at-rest encryption
+- **xUnit** — unit tests
 - **Inno Setup** — installer
 
 ## License
