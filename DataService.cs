@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Windows.Media.Imaging;
 
 namespace ClipMaster;
 
@@ -22,9 +23,10 @@ public static class TraceLog
 
 public class DataService
 {
-    private static readonly string DataDir  = Path.Combine(
+    private static readonly string DataDir   = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster");
-    private static readonly string DataFile = Path.Combine(DataDir, "data.json");
+    private static readonly string DataFile  = Path.Combine(DataDir, "data.json");
+    private static readonly string ImagesDir = Path.Combine(DataDir, "images");
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
 
@@ -52,6 +54,83 @@ public class DataService
             File.Move(tmp, DataFile, overwrite: true);
         }
         catch { /* disk full or locked */ }
+    }
+
+    public void DeleteImageFile(string? relPath)
+    {
+        if (string.IsNullOrEmpty(relPath)) return;
+        try
+        {
+            var abs = Path.Combine(DataDir, relPath);
+            if (File.Exists(abs)) File.Delete(abs);
+        }
+        catch (Exception ex) { TraceLog.Write($"DeleteImageFile failed: {ex.Message}"); }
+    }
+
+    public void PruneImageHistory(AppData data)
+    {
+        var max          = data.Settings.MaxImageHistory;
+        var pinnedImgs   = data.Clips.Where(c => c.IsImage && c.Pinned).ToList();
+        var unpinnedImgs = data.Clips.Where(c => c.IsImage && !c.Pinned).Take(max).ToList();
+        var kept         = pinnedImgs.Concat(unpinnedImgs).Select(c => c.Id).ToHashSet();
+
+        var toDelete = data.Clips.Where(c => c.IsImage && !kept.Contains(c.Id)).ToList();
+        foreach (var old in toDelete)
+        {
+            data.Clips.Remove(old);
+            DeleteImageFile(old.ImagePath);
+        }
+    }
+
+    public ClipEntry? AddImageClip(AppData data, BitmapSource image)
+    {
+        try
+        {
+            Directory.CreateDirectory(ImagesDir);
+
+            // Encode BitmapSource → PNG bytes
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(image));
+            byte[] bytes;
+            using (var ms = new System.IO.MemoryStream())
+            {
+                encoder.Save(ms);
+                bytes = ms.ToArray();
+            }
+
+            var id      = $"img_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{Random.Shared.Next(10000, 99999)}";
+            var relPath = $"images/{id}.png";
+            var absPath = Path.Combine(DataDir, relPath);
+            var tmpPath = absPath + ".tmp";
+
+            // Atomic write: write to .tmp then rename
+            File.WriteAllBytes(tmpPath, bytes);
+            File.Move(tmpPath, absPath, overwrite: true);
+
+            var entry = new ClipEntry
+            {
+                Id          = id,
+                IsImage     = true,
+                ImagePath   = relPath,
+                ImageWidth  = image.PixelWidth,
+                ImageHeight = image.PixelHeight,
+                ImageBytes  = bytes.LongLength,
+                CopiedAt    = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                CopyCount   = 1,
+            };
+            data.Clips.Insert(0, entry);
+
+            // Prune image clips independently from text clips
+            PruneImageHistory(data);
+
+            Save(data);
+            return entry;
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"AddImageClip FAILED: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
     }
 
     public static bool LooksLikePassword(string text)
