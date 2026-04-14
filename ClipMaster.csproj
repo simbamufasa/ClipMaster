@@ -11,10 +11,19 @@
     <RootNamespace>ClipMaster</RootNamespace>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="ClipMaster.Tests\**" />
+    <EmbeddedResource Remove="ClipMaster.Tests\**" />
+    <None Remove="ClipMaster.Tests\**" />
+  </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\icon.ico" />
     <Resource Include="Assets\icon-32.png" />
     <Resource Include="Themes\Dark.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 </Project>

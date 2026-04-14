@@ -8,6 +8,7 @@ namespace ClipMaster;
 public partial class TrayMenu : Window
 {
     public event Action? ShowRequested;
+    public event Action? ExportRequested;
     public event Action? QuitRequested;
 
     public TrayMenu()
@@ -38,6 +39,12 @@ public partial class TrayMenu : Window
     {
         Hide();
         ShowRequested?.Invoke();
+    }
+
+    private void ExportItem_Click(object sender, WpfMouseBtnArgs e)
+    {
+        Hide();
+        ExportRequested?.Invoke();
     }
 
     private void QuitItem_Click(object sender, WpfMouseBtnArgs e)

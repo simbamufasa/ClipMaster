@@ -23,37 +23,98 @@ public static class TraceLog
 
 public class DataService
 {
-    private static readonly string DataDir   = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster");
-    private static readonly string DataFile  = Path.Combine(DataDir, "data.json");
-    private static readonly string ImagesDir = Path.Combine(DataDir, "images");
+    private readonly string _dataDir;
+    private readonly string _dataFile;
+    private readonly string _binFile;
+    private readonly string _binTmp;
+    private readonly string _imagesDir;
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
-
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+
+    public DataService(string? dataDir = null)
+    {
+        _dataDir   = dataDir ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster");
+        _dataFile  = Path.Combine(_dataDir, "data.json");
+        _binFile   = Path.Combine(_dataDir, "data.bin");
+        _binTmp    = Path.Combine(_dataDir, "data.bin.tmp");
+        _imagesDir = Path.Combine(_dataDir, "images");
+    }
 
     public AppData Load()
     {
-        Directory.CreateDirectory(DataDir);
-        if (!File.Exists(DataFile)) return new AppData();
-        try
+        Directory.CreateDirectory(_dataDir);
+
+        // Clean up a stale .tmp from a previously interrupted save
+        if (File.Exists(_binTmp))
         {
-            var json = File.ReadAllText(DataFile);
-            return JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+            try { File.Delete(_binTmp); }
+            catch { /* best-effort */ }
         }
-        catch { return new AppData(); }
+
+        // Normal path: encrypted binary exists
+        if (File.Exists(_binFile))
+        {
+            try
+            {
+                var cipher = File.ReadAllBytes(_binFile);
+                var plain  = System.Security.Cryptography.ProtectedData.Unprotect(
+                    cipher, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                var json   = System.Text.Encoding.UTF8.GetString(plain);
+                var data   = JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+                // Deferred cleanup: remove orphaned plaintext file if migration was interrupted
+                if (File.Exists(_dataFile))
+                {
+                    try { File.Delete(_dataFile); }
+                    catch { /* best-effort */ }
+                }
+                return data;
+            }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"Load (bin) FAILED: {ex.GetType().Name}: {ex.Message}");
+                return new AppData();
+            }
+        }
+
+        // Migration path: legacy plaintext JSON exists
+        if (File.Exists(_dataFile))
+        {
+            try
+            {
+                var json = File.ReadAllText(_dataFile);
+                var data = JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+                Save(data);
+                File.Delete(_dataFile);
+                return data;
+            }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"Load (migration) FAILED: {ex.GetType().Name}: {ex.Message}");
+                return new AppData();
+            }
+        }
+
+        return new AppData();
     }
 
     public void Save(AppData data)
     {
         try
         {
-            Directory.CreateDirectory(DataDir);
-            var tmp = DataFile + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(data, JsonOpts));
-            File.Move(tmp, DataFile, overwrite: true);
+            Directory.CreateDirectory(_dataDir);
+            var json   = JsonSerializer.Serialize(data, JsonOpts);
+            var plain  = System.Text.Encoding.UTF8.GetBytes(json);
+            var cipher = System.Security.Cryptography.ProtectedData.Protect(
+                plain, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            File.WriteAllBytes(_binTmp, cipher);
+            File.Move(_binTmp, _binFile, overwrite: true);
         }
-        catch { /* disk full or locked */ }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"Save FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     public void DeleteImageFile(string? relPath)
@@ -61,7 +122,7 @@ public class DataService
         if (string.IsNullOrEmpty(relPath)) return;
         try
         {
-            var abs = Path.Combine(DataDir, relPath);
+            var abs = Path.Combine(_dataDir, relPath);
             if (File.Exists(abs)) File.Delete(abs);
         }
         catch (Exception ex) { TraceLog.Write($"DeleteImageFile failed: {ex.Message}"); }
@@ -86,7 +147,7 @@ public class DataService
     {
         try
         {
-            Directory.CreateDirectory(ImagesDir);
+            Directory.CreateDirectory(_imagesDir);
 
             // Encode BitmapSource → PNG bytes
             var encoder = new PngBitmapEncoder();
@@ -100,7 +161,7 @@ public class DataService
 
             var id      = $"img_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{Random.Shared.Next(10000, 99999)}";
             var relPath = $"images/{id}.png";
-            var absPath = Path.Combine(ImagesDir, $"{id}.png");
+            var absPath = Path.Combine(_imagesDir, $"{id}.png");
             var tmpPath = absPath + ".tmp";
 
             // Atomic write: write to .tmp then rename
@@ -147,9 +208,9 @@ public class DataService
             else                      hasSymbol = true;
         }
         if (t.Length >= 8 && hasUpper && hasLower && hasDigit && hasSymbol) return true;
-        if (Regex.IsMatch(t, @"^[A-Za-z0-9+/]{20,}={0,2}$")) return true;
-        if (Regex.IsMatch(t, @"(?:password|passwd|pwd|secret|token|key|auth)[\s:=]+\S+", RegexOptions.IgnoreCase)) return true;
-        if (Regex.IsMatch(t, @"^[0-9a-f]{32,}$", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(t, @"^[A-Za-z0-9+/]{20,}={0,2}$", RegexOptions.None, RegexTimeout)) return true;
+        if (Regex.IsMatch(t, @"(?:password|passwd|pwd|secret|token|key|auth)[\s:=]+\S+", RegexOptions.IgnoreCase, RegexTimeout)) return true;
+        if (Regex.IsMatch(t, @"^[0-9a-f]{32,}$", RegexOptions.IgnoreCase, RegexTimeout)) return true;
         return false;
     }
 

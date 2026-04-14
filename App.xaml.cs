@@ -15,6 +15,8 @@ public partial class App : Application
     private readonly DataService      _data   = new();
     private readonly ClipboardMonitor _clip   = new();
     private readonly HotkeyService    _hotkey = new();
+    private static readonly System.Text.Json.JsonSerializerOptions _exportJsonOpts =
+        new() { WriteIndented = true };
     private AppData _db = new();
     private string  _lastClip = "";
     private bool    _suppressing;   // prevents re-entrant clipboard handling
@@ -126,6 +128,7 @@ public partial class App : Application
         // Custom WPF tray menu (no WinForms ContextMenuStrip)
         _trayMenu = new TrayMenu();
         _trayMenu.ShowRequested += ToggleWindow;
+        _trayMenu.ExportRequested += OnExportBackup;
         _trayMenu.QuitRequested += Quit;
 
         _tray.MouseClick += (_, args) =>
@@ -135,6 +138,41 @@ public partial class App : Application
             else if (args.Button == MouseButtons.Right)
                 Dispatcher.Invoke(() => _trayMenu.ShowNearTray());
         };
+    }
+
+    private void OnExportBackup()
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title      = "Export ClipMaster Backup",
+            FileName   = $"clipmaster-backup-{DateTime.Now:yyyy-MM-dd}",
+            DefaultExt = ".json",
+            Filter     = "JSON files (*.json)|*.json",
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        // Warn if sensitive (masked) entries will be included in the plaintext backup
+        if (_db.Clips.Any(c => c.IsSensitive))
+        {
+            var result = System.Windows.MessageBox.Show(
+                "This backup includes entries that were detected as passwords or secrets. " +
+                "They will be saved as plain text in the backup file.\n\nContinue?",
+                "ClipMaster — Sensitive Data",
+                System.Windows.MessageBoxButton.OKCancel,
+                System.Windows.MessageBoxImage.Warning);
+            if (result != System.Windows.MessageBoxResult.OK) return;
+        }
+
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(_db, _exportJsonOpts);
+            File.WriteAllText(dlg.FileName, json);
+            TraceLog.Write($"Export OK → {dlg.FileName}");
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"Export FAILED: {ex}");
+        }
     }
 
     public void ToggleWindow()
