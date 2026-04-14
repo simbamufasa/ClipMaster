@@ -100,7 +100,7 @@ public class DataService
 
             var id      = $"img_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{Random.Shared.Next(10000, 99999)}";
             var relPath = $"images/{id}.png";
-            var absPath = Path.Combine(DataDir, relPath);
+            var absPath = Path.Combine(ImagesDir, $"{id}.png");
             var tmpPath = absPath + ".tmp";
 
             // Atomic write: write to .tmp then rename
