@@ -18,6 +18,7 @@ public class ClipEntry
     [JsonPropertyName("imageWidth")]   public int          ImageWidth   { get; set; }
     [JsonPropertyName("imageHeight")]  public int          ImageHeight  { get; set; }
     [JsonPropertyName("imageBytes")]   public long         ImageBytes   { get; set; }
+    [JsonPropertyName("language")]     public string       Language     { get; set; } = "";
 }
 
 public class Rule
@@ -41,6 +42,7 @@ public class AppSettings
     [JsonPropertyName("windowHeight")]    public int    WindowHeight    { get; set; } = 640;
     [JsonPropertyName("runOnStartup")]    public bool   RunOnStartup    { get; set; }
     [JsonPropertyName("maxImageHistory")] public int    MaxImageHistory { get; set; } = 50;
+    [JsonPropertyName("highlightCode")] public bool   HighlightCode   { get; set; } = true;
 }
 
 public class AppData
