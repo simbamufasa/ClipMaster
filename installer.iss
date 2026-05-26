@@ -1,5 +1,5 @@
 #define MyAppName "ClipMaster"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "ClipMaster"
 #define MyAppExeName "ClipMaster.exe"
 #define MyAppDescription "A power-user clipboard manager for Windows"

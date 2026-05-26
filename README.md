@@ -8,7 +8,7 @@ The killer feature: **regex-based transform rules** that automatically rewrite t
 
 ## Download
 
-**[ClipMaster-Setup-1.2.0.exe](https://github.com/simbamufasa/ClipMaster/releases/latest/download/ClipMaster-Setup-1.2.0.exe)** — single installer, no dependencies required.
+**[ClipMaster-Setup-1.3.0.exe](https://github.com/simbamufasa/ClipMaster/releases/latest/download/ClipMaster-Setup-1.3.0.exe)** — single installer, no dependencies required.
 
 ## Features
 
@@ -30,6 +30,13 @@ Define regex find-and-replace rules that run on every copy (or on demand):
 | **Manual** | Available as a button on each clip card |
 
 Rules support global (`g`), case-insensitive (`i`), and multiline (`m`) flags. A live preview in the rule editor shows the result before you save. All regex execution is capped at 1 second to prevent runaway patterns.
+
+### Developer Power-Paste
+For the code, JSON, and config you copy all day:
+
+- **Syntax highlighting** — clips are auto-detected (JSON, SQL, TS/JS, Go, Rust, Python, PHP, shell, YAML, XML, CSS, Dockerfile) and shown with a language badge and colored, monospaced preview. Zero dependencies; toggle it in **Settings → Code**.
+- **Detail view** — click **⤢** on a card or press `Ctrl+Enter` to open the full clip in a scrollable, syntax-highlighted view with Copy / Paste / Transform.
+- **One-click transforms** — right-click any clip (or use the detail view) to run built-in transforms without writing a regex: JSON pretty-print / minify / escape / unescape, Base64 and URL encode/decode, case conversion, and whitespace trimming. Invalid input is reported, never destructive — the original is preserved.
 
 ### Sensitive Content Masking
 ClipMaster auto-detects passwords, tokens, API keys, and hex strings on the clipboard and masks them in the UI. Hover to reveal. Toggle this in Settings.
@@ -68,8 +75,9 @@ Optional Windows startup registration via the registry `Run` key, configurable f
 |----------|--------|
 | `Ctrl+`` | Toggle ClipMaster window (global, configurable) |
 | `Enter` / `Ctrl+V` | Paste the top clip |
+| `Ctrl+Enter` | Open the top clip in the full detail view |
 | `Ctrl+F` | Focus the search box |
-| `Esc` | Hide the window / clear search |
+| `Esc` | Close the detail view, or hide the window / clear search |
 
 ## UI
 
@@ -106,7 +114,7 @@ Requires [Inno Setup 6](https://jrsoftware.org/isdl.php):
 iscc installer.iss
 ```
 
-Output: `installer/ClipMaster-Setup-1.2.0.exe`
+Output: `installer/ClipMaster-Setup-1.3.0.exe`
 
 ## Data Storage
 
@@ -131,6 +139,9 @@ ClipMaster/
 ├── PasteService.cs        Ctrl+V simulation via SendInput
 ├── StartupService.cs      Registry Run key management
 ├── DataService.cs         Encrypted persistence (DPAPI), image storage, regex engine
+├── LanguageDetector.cs    Heuristic clip language detection
+├── SyntaxHighlighter.cs   Zero-dependency tokenizer + WPF run renderer
+├── Transforms.cs          Built-in on-demand transform registry
 ├── RuleDialog.xaml.cs     Rule editor with live preview
 ├── TagDialog.xaml.cs      Tag management dialog
 ├── TrayMenu.xaml.cs       System tray context menu
