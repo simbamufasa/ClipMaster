@@ -357,6 +357,7 @@ public class DataService
             clip.CopiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             clip.CopyCount++;
             clip.Text = finalText;
+            clip.Language = data.Settings.HighlightCode ? LanguageDetector.Detect(finalText) : "";
             if (applied.Count > 0) clip.AppliedRules = applied;
             data.Clips.Insert(0, clip);
         }
@@ -371,6 +372,7 @@ public class DataService
                 CopyCount    = 1,
                 IsSensitive  = isSensitive,
                 AppliedRules = applied,
+                Language     = data.Settings.HighlightCode ? LanguageDetector.Detect(finalText) : "",
             });
         }
 
