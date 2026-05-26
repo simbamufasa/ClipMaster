@@ -304,8 +304,8 @@ public partial class MainWindow : Window
         return $"{h / 24}d ago";
     }
 
-    private static WpfFontFamily AppFont  => new("Segoe UI Variable, Segoe UI, sans-serif");
-    private static WpfFontFamily MonoFont => new("Cascadia Code, Consolas, monospace");
+    private static readonly WpfFontFamily AppFont  = new("Segoe UI Variable, Segoe UI, sans-serif");
+    private static readonly WpfFontFamily MonoFont = new("Cascadia Code, Consolas, monospace");
 
     private UIElement BuildClipCard(ClipEntry clip, int rank)
     {
@@ -1109,7 +1109,7 @@ public partial class MainWindow : Window
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
 
         DetailBadges.Children.Clear();
-        if (clip.Language.Length > 0)
+        if (_db.Settings.HighlightCode && clip.Language.Length > 0)
             DetailBadges.Children.Add(MakeBadge(clip.Language.ToUpperInvariant(), "#22202e", "#9b8cff"));
 
         DetailText.Inlines.Clear();
@@ -1195,6 +1195,7 @@ public partial class MainWindow : Window
             menu.Items.Add(group);
         }
         menu.PlacementTarget = anchor;
+        menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
     }
 }

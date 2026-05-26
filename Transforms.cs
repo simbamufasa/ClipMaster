@@ -48,7 +48,7 @@ public static class Transforms
         System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(s.ToLowerInvariant());
 
     private static string TrimLines(string s) =>
-        string.Join('\n', s.Split('\n').Select(line => line.TrimEnd()));
+        Regex.Replace(s, @"[ \t]+(?=\r?\n)|[ \t]+$", "", RegexOptions.None, RegexTimeout);
 
     private static string CollapseBlank(string s) =>
         Regex.Replace(s, @"(\r?\n){3,}", "\n\n", RegexOptions.None, RegexTimeout);

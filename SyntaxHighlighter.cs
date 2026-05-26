@@ -88,7 +88,9 @@ public static class SyntaxHighlighter
             char c = s[i];
 
             // line comment
-            var lc = spec.LineComments.FirstOrDefault(p => Matches(s, i, p));
+            string? lc = null;
+            foreach (var prefix in spec.LineComments)
+                if (Matches(s, i, prefix)) { lc = prefix; break; }
             if (lc != null)
             {
                 int j = i; while (j < n && s[j] != '\n') j++;
