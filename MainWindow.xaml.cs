@@ -31,9 +31,12 @@ public partial class MainWindow : Window
     private string  _filter    = "all";
     private string? _tagFilter;
     private string  _activeTab = "stack";
+    private List<ClipEntry> _renderedClips = [];   // current filtered view backing the ItemsControl
+    private readonly Dictionary<string, BitmapImage> _thumbCache = [];   // image id → decoded thumbnail
 
     private DispatcherTimer? _toastTimer;
     private DispatcherTimer? _resizeSaveTimer;
+    private DispatcherTimer? _searchDebounce;
     private bool _dialogOpen;
 
     public MainWindow(AppData db, DataService svc)
@@ -41,6 +44,36 @@ public partial class MainWindow : Window
         _db  = db;
         _svc = svc;
         InitializeComponent();
+        ClipList.ItemTemplate = BuildCardTemplate();
+    }
+
+    // Bridges the virtualizing ItemsControl to the imperative card builders: each realized item
+    // is rendered by running BuildClipCard/BuildImageCard for its ClipEntry. Only cards near the
+    // viewport are realized, so render cost is bounded by what's visible, not by history size.
+    private DataTemplate BuildCardTemplate()
+    {
+        var factory = new FrameworkElementFactory(typeof(ContentControl));
+        factory.SetValue(FocusableProperty, false);
+        factory.SetBinding(ContentControl.ContentProperty,
+            new System.Windows.Data.Binding { Converter = new CardFactory(this) });
+        return new DataTemplate(typeof(ClipEntry)) { VisualTree = factory };
+    }
+
+    private sealed class CardFactory : System.Windows.Data.IValueConverter
+    {
+        private readonly MainWindow _owner;
+        public CardFactory(MainWindow owner) => _owner = owner;
+
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            if (value is not ClipEntry clip) return new Border();
+            var rank = _owner._renderedClips.IndexOf(clip) + 1;   // 1-based; bounded by visible set
+            if (rank < 1) rank = 1;
+            return clip.IsImage ? _owner.BuildImageCard(clip, rank) : _owner.BuildClipCard(clip, rank);
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+            => throw new NotSupportedException();
     }
 
     // ── Tab navigation ──────────────────────────────────────────────────────
@@ -55,7 +88,7 @@ public partial class MainWindow : Window
         foreach (var tb in new[] { TabStack, TabRules, TabSettings })
             if (tb != btn) tb.IsChecked = false;
 
-        StackScrollView.Visibility    = _activeTab == "stack"    ? Visibility.Visible : Visibility.Collapsed;
+        ClipList.Visibility           = _activeTab == "stack"    ? Visibility.Visible : Visibility.Collapsed;
         RulesScrollView.Visibility    = _activeTab == "rules"    ? Visibility.Visible : Visibility.Collapsed;
         SettingsScrollView.Visibility = _activeTab == "settings" ? Visibility.Visible : Visibility.Collapsed;
 
@@ -96,9 +129,13 @@ public partial class MainWindow : Window
     {
         _db.Settings.WindowWidth  = (int)e.NewSize.Width;
         _db.Settings.WindowHeight = (int)e.NewSize.Height;
-        _resizeSaveTimer?.Stop();
-        _resizeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _resizeSaveTimer.Tick += (_, _) => { _svc.Save(_db); _resizeSaveTimer.Stop(); };
+        // Debounce the save behind a single reused timer (this fires repeatedly during a drag).
+        if (_resizeSaveTimer == null)
+        {
+            _resizeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            _resizeSaveTimer.Tick += (_, _) => { _resizeSaveTimer!.Stop(); _svc.QueueSave(_db); };
+        }
+        _resizeSaveTimer.Stop();
         _resizeSaveTimer.Start();
     }
 
@@ -141,7 +178,18 @@ public partial class MainWindow : Window
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         _search = SearchBox.Text;
-        RenderStack();
+        // Debounce: rebuild the list once typing pauses, not on every keystroke.
+        _searchDebounce ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _searchDebounce.Stop();
+        _searchDebounce.Tick -= SearchDebounce_Tick;
+        _searchDebounce.Tick += SearchDebounce_Tick;
+        _searchDebounce.Start();
+    }
+
+    private void SearchDebounce_Tick(object? sender, EventArgs e)
+    {
+        _searchDebounce?.Stop();
+        if (_activeTab == "stack") RenderStack();
     }
 
     private void SearchBox_KeyDown(object sender, WpfKeyArgs e)
@@ -187,12 +235,13 @@ public partial class MainWindow : Window
             clips = clips.Where(c => c.Tags.Contains(_tagFilter));
         if (!string.IsNullOrWhiteSpace(_search))
         {
-            var q = _search.ToLowerInvariant();
-            // Image clips have no text content — hide them entirely during search
+            var q = _search.Trim();
+            // Case-insensitive compare without allocating a lowercased copy of every clip.
+            // Image clips have no text content — hide them entirely during search.
             clips = clips.Where(c =>
                 !c.IsImage &&
-                (c.Text.ToLowerInvariant().Contains(q) ||
-                 c.Raw.ToLowerInvariant().Contains(q)));
+                (c.Text.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                 c.Raw.Contains(q, StringComparison.OrdinalIgnoreCase)));
         }
         var list     = clips.ToList();
         var pinned   = list.Where(c => c.Pinned).ToList();
@@ -204,15 +253,10 @@ public partial class MainWindow : Window
 
     private void RenderStack()
     {
-        ClipList.Children.Clear();
-        var clips = GetFilteredClips();
-        for (int i = 0; i < clips.Count; i++)
-        {
-            var card = clips[i].IsImage
-                ? BuildImageCard(clips[i], i + 1)
-                : BuildClipCard(clips[i], i + 1);
-            ClipList.Children.Add(card);
-        }
+        _renderedClips = GetFilteredClips();
+        // Assigning a fresh list reference makes the ItemsControl regenerate containers; the
+        // virtualizing panel only realizes (and thus only Build*Card-renders) what's on screen.
+        ClipList.ItemsSource = _renderedClips;
         RenderTagFilterChips();
     }
 
@@ -359,14 +403,14 @@ public partial class MainWindow : Window
         pinBtn.Click += (_, _) =>
         {
             clip.Pinned = !clip.Pinned;
-            _svc.Save(_db);
+            _svc.QueueSave(_db);
             RenderStack();
         };
         tagBtn.Click += (_, _) => OpenTagDialog(clip);
         delBtn.Click += (_, _) =>
         {
             _db.Clips.Remove(clip);
-            _svc.Save(_db);
+            _svc.QueueSave(_db);
             RenderStack();
         };
 
@@ -387,7 +431,7 @@ public partial class MainWindow : Window
                     clip.Text = _svc.ApplyRule(clip.Text, r);
                     clip.AppliedRules ??= [];
                     if (!clip.AppliedRules.Contains(r.Name)) clip.AppliedRules.Add(r.Name);
-                    _svc.Save(_db);
+                    _svc.QueueSave(_db);
                     RenderStack();
                     ShowToast("Rule applied");
                 }
@@ -432,15 +476,32 @@ public partial class MainWindow : Window
             }
             menu.Items.Add(MI("Paste",        () => ((App)WpfApp.Current).OnPasteClip(clip.Id)));
             menu.Items.Add(MI("Copy text",    () => { System.Windows.Clipboard.SetText(displayText); ShowToast("Copied"); }));
-            menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.Save(_db); RenderStack(); }));
+            menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.QueueSave(_db); RenderStack(); }));
             menu.Items.Add(MI("Manage tags…", () => OpenTagDialog(clip)));
             menu.Items.Add(new Separator());
-            menu.Items.Add(MI("Delete",       () => { _db.Clips.Remove(clip); _svc.Save(_db); RenderStack(); }));
+            menu.Items.Add(MI("Delete",       () => { _db.Clips.Remove(clip); _svc.QueueSave(_db); RenderStack(); }));
             card.ContextMenu = menu;
             menu.IsOpen      = true;
         };
 
         return card;
+    }
+
+    private BitmapImage GetThumbnail(string id, string absPath)
+    {
+        if (_thumbCache.TryGetValue(id, out var cached)) return cached;
+
+        var bmp = new BitmapImage();
+        bmp.BeginInit();
+        bmp.UriSource        = new Uri(absPath);
+        bmp.DecodePixelWidth = 420;   // decode a scaled-down copy, not the full-res image
+        bmp.CacheOption      = BitmapCacheOption.OnLoad;
+        bmp.EndInit();
+        bmp.Freeze();
+
+        if (_thumbCache.Count > 256) _thumbCache.Clear();   // simple bound; ids are never reused
+        _thumbCache[id] = bmp;
+        return bmp;
     }
 
     private UIElement BuildImageCard(ClipEntry clip, int rank)
@@ -501,13 +562,9 @@ public partial class MainWindow : Window
                 ".clipmaster", clip.ImagePath);
             try
             {
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.UriSource        = new Uri(abs);
-                bmp.DecodePixelWidth = 420;
-                bmp.CacheOption      = BitmapCacheOption.OnLoad;
-                bmp.EndInit();
-                bmp.Freeze();
+                // Decode once per image and cache the frozen bitmap, so scrolling (which
+                // re-realizes virtualized cards) and re-renders don't hit the disk again.
+                var bmp = GetThumbnail(clip.Id, abs);
                 thumbnail = new System.Windows.Controls.Image
                 {
                     Source              = bmp,
@@ -550,14 +607,14 @@ public partial class MainWindow : Window
         pinBtn.Click += (_, _) =>
         {
             clip.Pinned = !clip.Pinned;
-            _svc.Save(_db);
+            _svc.QueueSave(_db);
             RenderStack();
         };
         tagBtn.Click += (_, _) => OpenTagDialog(clip);
         delBtn.Click += (_, _) =>
         {
             _db.Clips.Remove(clip);
-            _svc.Save(_db);
+            _svc.QueueSave(_db);
             _svc.DeleteImageFile(clip.ImagePath);
             RenderStack();
         };
@@ -621,13 +678,13 @@ public partial class MainWindow : Window
             }
             menu.Items.Add(MI("Paste", () => ((App)WpfApp.Current).OnPasteImageClip(clip.Id)));
             menu.Items.Add(MI("Copy",  () => { ((App)WpfApp.Current).OnCopyImageClip(clip.Id); ShowToast("Copied"); }));
-            menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.Save(_db); RenderStack(); }));
+            menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.QueueSave(_db); RenderStack(); }));
             menu.Items.Add(MI("Manage tags…", () => OpenTagDialog(clip)));
             menu.Items.Add(new Separator());
             menu.Items.Add(MI("Delete", () =>
             {
                 _db.Clips.Remove(clip);
-                _svc.Save(_db);
+                _svc.QueueSave(_db);
                 _svc.DeleteImageFile(clip.ImagePath);
                 RenderStack();
             }));
@@ -688,9 +745,12 @@ public partial class MainWindow : Window
     {
         ToastText.Text      = msg;
         ToastBorder.Opacity = 1;
-        _toastTimer?.Stop();
-        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.8) };
-        _toastTimer.Tick += (_, _) => { ToastBorder.Opacity = 0; _toastTimer.Stop(); };
+        if (_toastTimer == null)
+        {
+            _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.8) };
+            _toastTimer.Tick += (_, _) => { _toastTimer!.Stop(); ToastBorder.Opacity = 0; };
+        }
+        _toastTimer.Stop();
         _toastTimer.Start();
     }
 
@@ -757,8 +817,8 @@ public partial class MainWindow : Window
             Margin    = new Thickness(0, 0, 8, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
-        enabledCb.Checked   += (_, _) => { rule.Enabled = true;  _svc.Save(_db); };
-        enabledCb.Unchecked += (_, _) => { rule.Enabled = false; _svc.Save(_db); };
+        enabledCb.Checked   += (_, _) => { rule.Enabled = true;  _svc.QueueSave(_db); };
+        enabledCb.Unchecked += (_, _) => { rule.Enabled = false; _svc.QueueSave(_db); };
 
         var editBtn = CardBtn("Edit",   "ActionBtn");
         var delBtn  = CardBtn("Delete", "DangerBtn");
@@ -773,7 +833,7 @@ public partial class MainWindow : Window
                 {
                     var idx = _db.Rules.IndexOf(rule);
                     if (idx >= 0) _db.Rules[idx] = dlg.Result;
-                    _svc.Save(_db);
+                    _svc.QueueSave(_db);
                     RenderRules();
                 }
             }
@@ -782,7 +842,7 @@ public partial class MainWindow : Window
         delBtn.Click += (_, _) =>
         {
             _db.Rules.Remove(rule);
-            _svc.Save(_db);
+            _svc.QueueSave(_db);
             RenderRules();
         };
 
@@ -816,7 +876,7 @@ public partial class MainWindow : Window
             if (dlg.ShowDialog() == true)
             {
                 _db.Rules.Add(dlg.Result);
-                _svc.Save(_db);
+                _svc.QueueSave(_db);
                 RenderRules();
             }
         }
@@ -910,7 +970,7 @@ public partial class MainWindow : Window
             {
                 _db.Tags.Remove(t);
                 _db.Clips.ForEach(c => c.Tags.Remove(t));
-                _svc.Save(_db);
+                _svc.QueueSave(_db);
                 RenderSettings();
                 RenderStack();
             };
@@ -927,7 +987,7 @@ public partial class MainWindow : Window
             var raw = newTagBox.Text.Trim().ToLowerInvariant().Replace(" ", "-");
             if (string.IsNullOrEmpty(raw) || _db.Tags.Contains(raw)) { newTagBox.Clear(); return; }
             _db.Tags.Add(raw);
-            _svc.Save(_db);
+            _svc.QueueSave(_db);
             newTagBox.Clear();
             RenderSettings();
             RenderStack();
@@ -962,7 +1022,7 @@ public partial class MainWindow : Window
                     foreach (var img in imagesToDelete)
                         _svc.DeleteImageFile(img.ImagePath);
                     _db.Clips = _db.Clips.Where(c => c.Pinned).ToList();
-                    _svc.Save(_db);
+                    _svc.QueueSave(_db);
                     RenderStack();
                     ShowToast("History cleared");
                 }
@@ -986,7 +1046,7 @@ public partial class MainWindow : Window
             s.RunOnStartup    = startupCb.IsChecked == true;
             s.MaxImageHistory = int.TryParse(maxImgBox.Text, out var mi) ? Math.Max(1, mi) : 50;
             _svc.PruneImageHistory(_db);
-            _svc.Save(_db);
+            _svc.QueueSave(_db);
             ((App)WpfApp.Current).RehostHotkey(s.Hotkey);
             StartupService.SetRunOnStartup(s.RunOnStartup);
             ShowToast("Settings saved");

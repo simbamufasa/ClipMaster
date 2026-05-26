@@ -232,31 +232,55 @@ public partial class App : Application
         if (now - _lastImageCapture < 500) return;
         _lastImageCapture = now;
 
-        // Encode to bytes on the UI thread — BitmapSource is a DispatcherObject and
-        // cannot be safely passed to a background thread even when frozen.
-        byte[] pngBytes;
-        int w = image.PixelWidth, h = image.PixelHeight;
+        // Copy raw pixels off the clipboard bitmap on the UI thread — a fast memcpy. The
+        // expensive PNG compression and disk write then run on a background thread, working
+        // only from the detached pixel buffer (no BitmapSource crosses the thread boundary).
+        int w, h, stride;
+        byte[] pixels;
         try
         {
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(image));
-            using var ms = new MemoryStream();
-            encoder.Save(ms);
-            pngBytes = ms.ToArray();
+            BitmapSource bgra = image.Format == System.Windows.Media.PixelFormats.Bgra32
+                ? image
+                : new FormatConvertedBitmap(image, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+            w      = bgra.PixelWidth;
+            h      = bgra.PixelHeight;
+            stride = w * 4;
+            pixels = new byte[h * stride];
+            bgra.CopyPixels(pixels, stride, 0);
         }
         catch (Exception ex)
         {
-            TraceLog.Write($"OnNewClipImage encode FAILED: {ex.GetType().Name}: {ex.Message}");
+            TraceLog.Write($"OnNewClipImage CopyPixels FAILED: {ex.GetType().Name}: {ex.Message}");
             return;
         }
 
-        // Hand off only the raw bytes to the background thread for disk I/O.
         Task.Run(() =>
         {
-            var entry = _data.AddImageClip(_db, pngBytes, w, h);
-            if (entry == null) return;
+            byte[] pngBytes;
+            try
+            {
+                var bmp = BitmapSource.Create(w, h, 96, 96,
+                    System.Windows.Media.PixelFormats.Bgra32, null, pixels, stride);
+                bmp.Freeze();
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bmp));
+                using var ms = new MemoryStream();
+                encoder.Save(ms);
+                pngBytes = ms.ToArray();
+            }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"OnNewClipImage encode FAILED: {ex.GetType().Name}: {ex.Message}");
+                return;
+            }
+
+            var written = _data.WriteImageFile(pngBytes);
+            if (written == null) return;
+
+            // Model mutation + UI refresh back on the UI thread.
             Dispatcher.Invoke(() =>
             {
+                _data.AddImageEntry(_db, written.Value.Id, written.Value.RelPath, written.Value.Bytes, w, h);
                 if (_window?.IsVisible == true)
                     _window.RefreshClips(_db.Clips);
             });
@@ -389,6 +413,7 @@ public partial class App : Application
 
     private void Quit()
     {
+        _data.Flush();   // ensure any queued save is durable before exiting
         _tray?.Dispose();
         _clip.Dispose();
         _hotkey.Dispose();
@@ -397,6 +422,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _data.Flush();   // ensure any queued save is durable before exiting
         _tray?.Dispose();
         _clip.Dispose();
         _hotkey.Dispose();

@@ -2,12 +2,14 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 
 namespace ClipMaster;
 
 public class ClipboardMonitor : IDisposable
 {
     private const int WM_CLIPBOARDUPDATE = 0x031D;
+    private const int MaxRetries         = 4;
 
     [DllImport("user32.dll")] private static extern bool AddClipboardFormatListener(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
@@ -15,8 +17,9 @@ public class ClipboardMonitor : IDisposable
     public event Action<string>?       NewClipText;
     public event Action<BitmapSource>? NewClipImage;
 
-    private HwndSource? _source;
-    private IntPtr      _hwnd;
+    private HwndSource?     _source;
+    private IntPtr          _hwnd;
+    private DispatcherTimer? _retryTimer;   // non-blocking retry when the clipboard is locked
 
     public void Attach(Window window)
     {
@@ -31,37 +34,51 @@ public class ClipboardMonitor : IDisposable
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == WM_CLIPBOARDUPDATE)
+            TryReadClipboard(attempt: 0);
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Reads the clipboard on the UI thread (required by WPF). If the source app still holds a
+    /// lock (common with browser copy buttons / Snipping Tool), reschedules itself via a timer
+    /// instead of blocking the UI thread with Thread.Sleep.
+    /// </summary>
+    private void TryReadClipboard(int attempt)
+    {
+        try
         {
-            // Clipboard may still be locked by the source app (e.g. browser copy buttons).
-            // Retry a few times with a short delay to handle transient locks.
-            for (int attempt = 0; attempt < 5; attempt++)
+            if (System.Windows.Clipboard.ContainsText())
             {
-                try
-                {
-                    if (System.Windows.Clipboard.ContainsText())
-                    {
-                        var text = System.Windows.Clipboard.GetText();
-                        if (!string.IsNullOrEmpty(text))
-                            NewClipText?.Invoke(text);
-                    }
-                    else
-                    {
-                        // Text takes priority. Only check for images when no text is present.
-                        var image = TryGetClipboardImage();
-                        if (image != null)
-                            NewClipImage?.Invoke(image);
-                    }
-                    break;
-                }
-                catch (COMException)
-                {
-                    if (attempt < 4)
-                        Thread.Sleep(30);
-                }
-                catch { break; }
+                var text = System.Windows.Clipboard.GetText();
+                if (!string.IsNullOrEmpty(text))
+                    NewClipText?.Invoke(text);
+            }
+            else
+            {
+                // Text takes priority. Only check for images when no text is present.
+                var image = TryGetClipboardImage();
+                if (image != null)
+                    NewClipImage?.Invoke(image);
             }
         }
-        return IntPtr.Zero;
+        catch (COMException)
+        {
+            if (attempt < MaxRetries)
+                ScheduleRetry(attempt + 1);
+        }
+        catch { /* unrecoverable — drop this update */ }
+    }
+
+    private void ScheduleRetry(int nextAttempt)
+    {
+        _retryTimer?.Stop();
+        _retryTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+        _retryTimer.Tick += (_, _) =>
+        {
+            _retryTimer?.Stop();
+            TryReadClipboard(nextAttempt);
+        };
+        _retryTimer.Start();
     }
 
     private static BitmapSource? TryGetClipboardImage()
@@ -97,6 +114,8 @@ public class ClipboardMonitor : IDisposable
 
     public void Dispose()
     {
+        _retryTimer?.Stop();
+        _retryTimer = null;
         if (_source != null)
         {
             RemoveClipboardFormatListener(_hwnd);

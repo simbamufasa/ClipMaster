@@ -31,6 +31,14 @@ public class DataService
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
+    // Background save queue. Serialization (which reads the in-memory model) happens on the
+    // caller's thread; encryption + disk I/O happen on a single background worker. Rapid saves
+    // coalesce — only the most recent snapshot is ever written.
+    private readonly object _saveLock  = new();   // guards _pendingPlain / _writerTask
+    private readonly object _writeLock = new();   // serializes physical file writes
+    private byte[]? _pendingPlain;
+    private Task?   _writerTask;
+
     public DataService(string? dataDir = null)
     {
         _dataDir   = dataDir ?? Path.Combine(
@@ -98,21 +106,95 @@ public class DataService
         return new AppData();
     }
 
+    /// <summary>
+    /// Synchronously serialize, encrypt, and write the model to disk. Blocks the caller for the
+    /// full cost (serialize + DPAPI + I/O). Prefer <see cref="QueueSave"/> on hot paths; this is
+    /// kept for startup migration, shutdown flush, and tests.
+    /// </summary>
     public void Save(AppData data)
     {
         try
         {
-            Directory.CreateDirectory(_dataDir);
-            var json   = JsonSerializer.Serialize(data, JsonOpts);
-            var plain  = System.Text.Encoding.UTF8.GetBytes(json);
-            var cipher = System.Security.Cryptography.ProtectedData.Protect(
-                plain, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
-            File.WriteAllBytes(_binTmp, cipher);
-            File.Move(_binTmp, _binFile, overwrite: true);
+            var plain = JsonSerializer.SerializeToUtf8Bytes(data, JsonOpts);
+            WriteCipher(plain);
         }
         catch (Exception ex)
         {
             TraceLog.Write($"Save FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Serialize the model on the calling thread (cheap — reads the in-memory model once), then
+    /// hand the bytes to a background worker that encrypts and writes. Rapid calls coalesce, so
+    /// a burst of copies results in a single disk write of the latest state. The UI thread never
+    /// pays for encryption or I/O.
+    /// </summary>
+    public void QueueSave(AppData data)
+    {
+        byte[] plain;
+        try { plain = JsonSerializer.SerializeToUtf8Bytes(data, JsonOpts); }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"QueueSave serialize FAILED: {ex.GetType().Name}: {ex.Message}");
+            return;
+        }
+
+        lock (_saveLock)
+        {
+            _pendingPlain = plain;                       // coalesce — newest snapshot wins
+            _writerTask ??= Task.Run(DrainWrites);       // start a worker only if none is running
+        }
+    }
+
+    private void DrainWrites()
+    {
+        while (true)
+        {
+            byte[] plain;
+            lock (_saveLock)
+            {
+                if (_pendingPlain == null) { _writerTask = null; return; }
+                plain = _pendingPlain;
+                _pendingPlain = null;
+            }
+            WriteCipher(plain);
+        }
+    }
+
+    /// <summary>
+    /// Block until any queued save has been written. Call on shutdown so the latest state is
+    /// durable before the process exits.
+    /// </summary>
+    public void Flush()
+    {
+        Task? t;
+        lock (_saveLock) { t = _writerTask; }
+        try { t?.Wait(TimeSpan.FromSeconds(5)); }
+        catch (Exception ex) { TraceLog.Write($"Flush wait FAILED: {ex.GetType().Name}: {ex.Message}"); }
+
+        // A save may have been queued after the worker exited; write it synchronously.
+        byte[]? leftover;
+        lock (_saveLock) { leftover = _pendingPlain; _pendingPlain = null; }
+        if (leftover != null) WriteCipher(leftover);
+    }
+
+    private void WriteCipher(byte[] plain)
+    {
+        lock (_writeLock)   // one physical write at a time, regardless of caller
+        {
+            try
+            {
+                Directory.CreateDirectory(_dataDir);
+                var cipher = System.Security.Cryptography.ProtectedData.Protect(
+                    plain, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                File.WriteAllBytes(_binTmp, cipher);
+                File.Move(_binTmp, _binFile, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"WriteCipher FAILED: {ex.GetType().Name}: {ex.Message}");
+            }
         }
     }
 
@@ -142,7 +224,12 @@ public class DataService
         }
     }
 
-    public ClipEntry? AddImageClip(AppData data, byte[] pngBytes, int width, int height)
+    /// <summary>
+    /// Background-thread safe: atomically writes the encoded PNG to disk. Does NOT touch the
+    /// in-memory model. Returns the clip id, the path relative to the data dir, and the byte
+    /// size, or null on failure. Pair with <see cref="AddImageEntry"/> on the UI thread.
+    /// </summary>
+    public (string Id, string RelPath, long Bytes)? WriteImageFile(byte[] pngBytes)
     {
         try
         {
@@ -157,30 +244,40 @@ public class DataService
             File.WriteAllBytes(tmpPath, pngBytes);
             File.Move(tmpPath, absPath, overwrite: true);
 
-            var entry = new ClipEntry
-            {
-                Id          = id,
-                IsImage     = true,
-                ImagePath   = relPath,
-                ImageWidth  = width,
-                ImageHeight = height,
-                ImageBytes  = pngBytes.LongLength,
-                CopiedAt    = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                CopyCount   = 1,
-            };
-            data.Clips.Insert(0, entry);
-
-            // Prune image clips independently from text clips
-            PruneImageHistory(data);
-
-            Save(data);
-            return entry;
+            return (id, relPath, pngBytes.LongLength);
         }
         catch (Exception ex)
         {
-            TraceLog.Write($"AddImageClip FAILED: {ex.GetType().Name}: {ex.Message}");
+            TraceLog.Write($"WriteImageFile FAILED: {ex.GetType().Name}: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// UI-thread only: inserts an already-written image file into the model, prunes image
+    /// history, and queues a save. Keeping model mutation on the UI thread avoids racing the
+    /// list against the renderer.
+    /// </summary>
+    public ClipEntry AddImageEntry(AppData data, string id, string relPath, long bytes, int width, int height)
+    {
+        var entry = new ClipEntry
+        {
+            Id          = id,
+            IsImage     = true,
+            ImagePath   = relPath,
+            ImageWidth  = width,
+            ImageHeight = height,
+            ImageBytes  = bytes,
+            CopiedAt    = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            CopyCount   = 1,
+        };
+        data.Clips.Insert(0, entry);
+
+        // Prune image clips independently from text clips
+        PruneImageHistory(data);
+
+        QueueSave(data);
+        return entry;
     }
 
     public static bool LooksLikePassword(string text)
@@ -282,7 +379,7 @@ public class DataService
         var unpinned = data.Clips.Where(c => !c.Pinned).Take(max).ToList();
         data.Clips   = [.. pinned, .. unpinned];
 
-        Save(data);
+        QueueSave(data);
         return (finalText, finalText != rawText);
     }
 
@@ -295,7 +392,7 @@ public class DataService
         clip.CopiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         clip.CopyCount++;
         data.Clips.Insert(0, clip);
-        Save(data);
+        QueueSave(data);
         return data.Clips;
     }
 }

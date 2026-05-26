@@ -61,7 +61,7 @@ public partial class TagDialog : Window
         { NewTagBox.Clear(); return; }
         _db.Tags.Add(raw);
         _currentTags.Add(raw);
-        _svc.Save(_db);
+        _svc.QueueSave(_db);
         NewTagBox.Clear();
         Render();
     }
@@ -69,7 +69,7 @@ public partial class TagDialog : Window
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         _clip.Tags   = [.. _currentTags];
-        _svc.Save(_db);
+        _svc.QueueSave(_db);
         DialogResult = true;
     }
 

@@ -126,9 +126,29 @@
 
       <!-- Tab content -->
       <Grid Grid.Row="5">
-        <ScrollViewer x:Name="StackScrollView" VerticalScrollBarVisibility="Auto">
-          <StackPanel x:Name="ClipList" Margin="10,8,10,8"/>
-        </ScrollViewer>
+        <!-- Virtualized clip list: only cards near the viewport are realized. The card
+             content for each item is built imperatively (see CardFactory in code-behind). -->
+        <ItemsControl x:Name="ClipList"
+                      Margin="10,8,10,8"
+                      Background="Transparent"
+                      VirtualizingPanel.IsVirtualizing="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      VirtualizingPanel.ScrollUnit="Pixel">
+          <ItemsControl.Template>
+            <ControlTemplate TargetType="ItemsControl">
+              <ScrollViewer CanContentScroll="True"
+                            VerticalScrollBarVisibility="Auto"
+                            Focusable="False">
+                <ItemsPresenter/>
+              </ScrollViewer>
+            </ControlTemplate>
+          </ItemsControl.Template>
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <VirtualizingStackPanel/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
 
         <ScrollViewer x:Name="RulesScrollView" Visibility="Collapsed"
                       VerticalScrollBarVisibility="Auto">
