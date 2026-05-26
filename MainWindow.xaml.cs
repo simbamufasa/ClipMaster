@@ -326,6 +326,8 @@ public partial class MainWindow : Window
         if (clip.Pinned)                  badgesPanel.Children.Add(MakeBadge("pinned",      "#3d3880", "#a89ef7"));
         if (clip.IsSensitive)             badgesPanel.Children.Add(MakeBadge("sensitive",   "#4d1f1f", "#e05252"));
         if (clip.AppliedRules?.Count > 0) badgesPanel.Children.Add(MakeBadge("transformed", "#1a3a2a", "#4caf82"));
+        if (_db.Settings.HighlightCode && clip.Language.Length > 0)
+            badgesPanel.Children.Add(MakeBadge(clip.Language.ToUpperInvariant(), "#22202e", "#9b8cff"));
 
         // Tag pills
         var tagsPanel = new StackPanel
@@ -366,11 +368,11 @@ public partial class MainWindow : Window
 
         // Clip text
         var displayText = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+        var isCode = !clip.IsSensitive && _db.Settings.HighlightCode && clip.Language.Length > 0;
         var clipTextTb  = new TextBlock
         {
-            Text         = clip.IsSensitive ? "••••••••" : displayText,
             FontSize     = 12,
-            FontFamily   = AppFont,
+            FontFamily   = isCode ? MonoFont : AppFont,
             Foreground   = (WpfBrush)FindResource("Text1Brush"),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxHeight    = 72,
@@ -380,6 +382,16 @@ public partial class MainWindow : Window
             LineHeight   = 18,
         };
         if (clip.IsSensitive)
+            clipTextTb.Text = "••••••••";
+        else if (isCode)
+        {
+            // Tokenize only the slice the card can show (cap protects scroll/realize cost).
+            var slice = displayText.Length > 600 ? displayText[..600] : displayText;
+            SyntaxHighlighter.AppendTo(clipTextTb.Inlines, slice, clip.Language);
+        }
+        else
+            clipTextTb.Text = displayText;
+        if (clip.IsSensitive)
         {
             clipTextTb.MouseEnter += (_, _) => { clipTextTb.Text = displayText; clipTextTb.Opacity = 0.7; };
             clipTextTb.MouseLeave += (_, _) => { clipTextTb.Text = "••••••••";  clipTextTb.Opacity = opacity; };
@@ -388,11 +400,12 @@ public partial class MainWindow : Window
         // Action buttons
         var actions = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
 
-        var pasteBtn = CardBtn("Paste", "PasteBtn");
-        var copyBtn  = CardBtn("Copy",  "ActionBtn");
-        var pinBtn   = CardBtn(clip.Pinned ? "Unpin" : "Pin", "ActionBtn");
-        var tagBtn   = CardBtn("Tag",   "ActionBtn");
-        var delBtn   = CardBtn("✕",     "DangerBtn");
+        var pasteBtn  = CardBtn("Paste", "PasteBtn");
+        var copyBtn   = CardBtn("Copy",  "ActionBtn");
+        var pinBtn    = CardBtn(clip.Pinned ? "Unpin" : "Pin", "ActionBtn");
+        var tagBtn    = CardBtn("Tag",   "ActionBtn");
+        var expandBtn = CardBtn("⤢",    "ActionBtn");
+        var delBtn    = CardBtn("✕",     "DangerBtn");
 
         pasteBtn.Click += (_, _) => ((App)WpfApp.Current).OnPasteClip(clip.Id);
         copyBtn.Click  += (_, _) =>
@@ -418,6 +431,8 @@ public partial class MainWindow : Window
         actions.Children.Add(copyBtn);
         actions.Children.Add(pinBtn);
         actions.Children.Add(tagBtn);
+        expandBtn.Click += (_, _) => OpenDetail(clip);
+        actions.Children.Add(expandBtn);
 
         // Manual rule buttons
         foreach (var rule in _db.Rules.Where(r => r.Enabled && r.Mode == "manual"))
@@ -1053,4 +1068,7 @@ public partial class MainWindow : Window
         };
         SettingsForm.Children.Add(saveBtn);
     }
+
+    // TODO: replaced in Task 8
+    private void OpenDetail(ClipEntry clip) { }
 }
