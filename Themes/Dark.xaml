@@ -31,6 +31,15 @@
   <SolidColorBrush x:Key="Text3Brush"        Color="{StaticResource Text3}"/>
   <SolidColorBrush x:Key="DangerBrush"       Color="{StaticResource Danger}"/>
 
+  <!-- ── Code token colors ─────────────────────────────────────────── -->
+  <SolidColorBrush x:Key="CodeKeywordBrush"     Color="#c08cff"/>
+  <SolidColorBrush x:Key="CodeStringBrush"      Color="#9ece6a"/>
+  <SolidColorBrush x:Key="CodeNumberBrush"      Color="#e0af68"/>
+  <SolidColorBrush x:Key="CodeCommentBrush"     Color="#6a6a6a"/>
+  <SolidColorBrush x:Key="CodePunctuationBrush" Color="#9aa0aa"/>
+  <SolidColorBrush x:Key="CodePropertyBrush"    Color="#7dcfff"/>
+  <SolidColorBrush x:Key="CodeLiteralBrush"     Color="#ff9e64"/>
+
   <!-- ─�� Base button ───────────────────────────────────────────────── -->
   <Style x:Key="ActionBtn" TargetType="Button">
     <Setter Property="Background"      Value="{StaticResource SurfaceBrush}"/>
