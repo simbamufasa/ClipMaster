@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -33,6 +34,7 @@ public partial class MainWindow : Window
     private string  _activeTab = "stack";
     private List<ClipEntry> _renderedClips = [];   // current filtered view backing the ItemsControl
     private readonly Dictionary<string, BitmapImage> _thumbCache = [];   // image id → decoded thumbnail
+    private string? _detailClipId;
 
     private DispatcherTimer? _toastTimer;
     private DispatcherTimer? _resizeSaveTimer;
@@ -122,7 +124,7 @@ public partial class MainWindow : Window
 
     private void Window_Deactivated(object sender, EventArgs e)
     {
-        if (IsVisible && !_dialogOpen) Hide();
+        if (IsVisible && !_dialogOpen) { CloseDetail(); Hide(); }
     }
 
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -154,10 +156,20 @@ public partial class MainWindow : Window
 
     private void Window_KeyDown(object sender, WpfKeyArgs e)
     {
-        if (e.Key == Key.Escape) { Hide(); e.Handled = true; return; }
+        if (e.Key == Key.Escape)
+        {
+            if (DetailOverlay.Visibility == Visibility.Visible) { CloseDetail(); e.Handled = true; return; }
+            Hide(); e.Handled = true; return;
+        }
 
         if (_activeTab == "stack")
         {
+            if (e.Key == Key.Enter && Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && !SearchBox.IsFocused)
+            {
+                var top = GetFilteredClips().FirstOrDefault();
+                if (top != null) OpenDetail(top);
+                e.Handled = true; return;
+            }
             if (e.Key == Key.Enter && !SearchBox.IsFocused)
             {
                 e.Handled = true; PasteTop(); return;
@@ -1069,6 +1081,60 @@ public partial class MainWindow : Window
         SettingsForm.Children.Add(saveBtn);
     }
 
-    // TODO: replaced in Task 8
-    private void OpenDetail(ClipEntry clip) { }
+    private void OpenDetail(ClipEntry clip)
+    {
+        _detailClipId = clip.Id;
+        RenderDetail();
+        DetailOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void CloseDetail()
+    {
+        _detailClipId = null;
+        DetailOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void RenderDetail()
+    {
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == _detailClipId);
+        if (clip == null) { CloseDetail(); return; }
+        var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+
+        DetailBadges.Children.Clear();
+        if (clip.Language.Length > 0)
+            DetailBadges.Children.Add(MakeBadge(clip.Language.ToUpperInvariant(), "#22202e", "#9b8cff"));
+
+        DetailText.Inlines.Clear();
+        if (_db.Settings.HighlightCode && clip.Language.Length > 0)
+            SyntaxHighlighter.AppendTo(DetailText.Inlines, text, clip.Language);
+        else
+            DetailText.Inlines.Add(new Run(text));
+    }
+
+    private void DetailBack_Click(object sender, RoutedEventArgs e) => CloseDetail();
+
+    private void DetailCopy_Click(object sender, RoutedEventArgs e)
+    {
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == _detailClipId);
+        if (clip == null) return;
+        System.Windows.Clipboard.SetText(!string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw);
+        ShowToast("Copied");
+    }
+
+    private void DetailPaste_Click(object sender, RoutedEventArgs e)
+    {
+        if (_detailClipId == null) return;
+        var id = _detailClipId;
+        CloseDetail();
+        ((App)WpfApp.Current).OnPasteClip(id);
+    }
+
+    private void DetailTransform_Click(object sender, RoutedEventArgs e)
+    {
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == _detailClipId);
+        if (clip != null) ShowTransformMenu(clip, (UIElement)sender);
+    }
+
+    // TODO: replaced in Task 9
+    private void ShowTransformMenu(ClipEntry clip, UIElement anchor) { }
 }

@@ -166,6 +166,32 @@
         </ScrollViewer>
       </Grid>
 
+      <!-- Detail overlay -->
+      <Border x:Name="DetailOverlay"
+              Grid.RowSpan="6"
+              Background="{StaticResource BgBrush}"
+              Visibility="Collapsed">
+        <DockPanel Margin="12">
+          <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+            <StackPanel x:Name="DetailBadges" Orientation="Horizontal" HorizontalAlignment="Left"/>
+            <Button Content="Back" HorizontalAlignment="Right"
+                    Style="{StaticResource ActionBtn}" Click="DetailBack_Click"/>
+          </Grid>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+            <Button Content="Copy"  Style="{StaticResource ActionBtn}" Margin="0,0,6,0" Click="DetailCopy_Click"/>
+            <Button Content="Paste" Style="{StaticResource PasteBtn}"  Margin="0,0,6,0" Click="DetailPaste_Click"/>
+            <Button x:Name="DetailTransformBtn" Content="Transform ▾" Style="{StaticResource ActionBtn}" Click="DetailTransform_Click"/>
+          </StackPanel>
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+            <TextBlock x:Name="DetailText"
+                       FontFamily="Cascadia Code, Consolas, monospace"
+                       FontSize="12"
+                       Foreground="{StaticResource Text1Brush}"
+                       TextWrapping="NoWrap"/>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+
       <!-- Toast overlay -->
       <Border x:Name="ToastBorder"
               Grid.RowSpan="6"
