@@ -505,6 +505,7 @@ public partial class MainWindow : Window
             menu.Items.Add(MI("Copy text",    () => { System.Windows.Clipboard.SetText(displayText); ShowToast("Copied"); }));
             menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.QueueSave(_db); RenderStack(); }));
             menu.Items.Add(MI("Manage tags…", () => OpenTagDialog(clip)));
+            AddTransformSubmenu(menu, clip);
             menu.Items.Add(new Separator());
             menu.Items.Add(MI("Delete",       () => { _db.Clips.Remove(clip); _svc.QueueSave(_db); RenderStack(); }));
             card.ContextMenu = menu;
@@ -1135,6 +1136,58 @@ public partial class MainWindow : Window
         if (clip != null) ShowTransformMenu(clip, (UIElement)sender);
     }
 
-    // TODO: replaced in Task 9
-    private void ShowTransformMenu(ClipEntry clip, UIElement anchor) { }
+    private void ApplyTransform(ClipEntry clip, Transform t)
+    {
+        try
+        {
+            var src = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+            clip.Text = t.Apply(src);
+            clip.AppliedRules ??= [];
+            if (!clip.AppliedRules.Contains(t.Label)) clip.AppliedRules.Add(t.Label);
+            _svc.QueueSave(_db);
+            if (_detailClipId == clip.Id) RenderDetail();
+            RenderStack();
+            ShowToast($"{t.Label} applied");
+        }
+        catch (Exception ex) { ShowToast($"{t.Label}: {ex.Message}"); }
+    }
+
+    // Adds a "Transform ▸" parent item (with grouped children) to an existing context menu.
+    private void AddTransformSubmenu(ContextMenu menu, ClipEntry clip)
+    {
+        var parent = new MenuItem { Header = "Transform" };
+        foreach (var grp in Transforms.All.GroupBy(t => t.Group))
+        {
+            var group = new MenuItem { Header = grp.Key };
+            foreach (var tr in grp)
+            {
+                var t  = tr;
+                var mi = new MenuItem { Header = t.Label };
+                mi.Click += (_, _) => ApplyTransform(clip, t);
+                group.Items.Add(mi);
+            }
+            parent.Items.Add(group);
+        }
+        menu.Items.Add(parent);
+    }
+
+    // Standalone grouped transform menu, anchored to a button (used by the detail view).
+    private void ShowTransformMenu(ClipEntry clip, UIElement anchor)
+    {
+        var menu = new ContextMenu();
+        foreach (var grp in Transforms.All.GroupBy(t => t.Group))
+        {
+            var group = new MenuItem { Header = grp.Key };
+            foreach (var tr in grp)
+            {
+                var t  = tr;
+                var mi = new MenuItem { Header = t.Label };
+                mi.Click += (_, _) => ApplyTransform(clip, t);
+                group.Items.Add(mi);
+            }
+            menu.Items.Add(group);
+        }
+        menu.PlacementTarget = anchor;
+        menu.IsOpen = true;
+    }
 }
