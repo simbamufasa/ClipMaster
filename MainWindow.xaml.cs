@@ -962,6 +962,12 @@ public partial class MainWindow : Window
         var maskCb = new WpfCheckBox { IsChecked = s.MaskPasswords, Foreground = (WpfBrush)FindResource("Text1Brush") };
         SettingRow("Mask sensitive content", "Blur passwords & tokens", maskCb);
 
+        // Code
+        SectionHeader("CODE");
+
+        var highlightCb = new WpfCheckBox { IsChecked = s.HighlightCode, Foreground = (WpfBrush)FindResource("Text1Brush") };
+        SettingRow("Highlight & detect code", "Syntax-highlight code clips and show a language badge", highlightCb);
+
         // Rules
         SectionHeader("RULES");
 
@@ -1070,6 +1076,7 @@ public partial class MainWindow : Window
             s.Hotkey          = hotkeyBox.Text.Trim();
             s.MaxHistory      = int.TryParse(maxBox.Text, out var m) ? m : 500;
             s.MaskPasswords   = maskCb.IsChecked == true;
+            s.HighlightCode   = highlightCb.IsChecked == true;
             s.AutoApplyRules  = autoRulesCb.IsChecked == true;
             s.RunOnStartup    = startupCb.IsChecked == true;
             s.MaxImageHistory = int.TryParse(maxImgBox.Text, out var mi) ? Math.Max(1, mi) : 50;
