@@ -21,38 +21,70 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        _db = _data.Load();
+        try { _db = _data.Load(); }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"Load FAILED: {ex}");
+            _db = new AppData();
+        }
+        TraceLog.Write($"Startup: rules={_db.Rules.Count}");
 
         _window = new MainWindow(_db, _data);
 
-        // Attach Win32 services after the window handle exists
+        // Wire up Win32 services once the window handle exists.
+        // SourceInitialized fires when EnsureHandle() or Show() creates the HWND.
         _window.SourceInitialized += (_, _) =>
         {
-            _clip.Attach(_window);
-            _hotkey.Attach(_window);
-
-            _clip.NewClipText    += OnNewClip;
-            _hotkey.HotkeyPressed += ToggleWindow;
-
-            // Register hotkey; fall back if taken
-            var registered = _hotkey.Register(_db.Settings.Hotkey);
-            if (!registered)
+            try
             {
-                const string fallback = "Ctrl+Shift+C";
-                if (_hotkey.Register(fallback))
+                _clip.Attach(_window);
+                _hotkey.Attach(_window);
+
+                _clip.NewClipText    += OnNewClip;
+                _hotkey.HotkeyPressed += ToggleWindow;
+
+                // Register hotkey; fall back if taken
+                var registered = _hotkey.Register(_db.Settings.Hotkey);
+                if (!registered)
                 {
-                    _db.Settings.Hotkey = fallback;
-                    _data.Save(_db);
+                    const string fallback = "Ctrl+Shift+C";
+                    if (_hotkey.Register(fallback))
+                    {
+                        _db.Settings.Hotkey = fallback;
+                        _data.Save(_db);
+                    }
                 }
             }
+            catch (Exception ex) { TraceLog.Write($"SourceInitialized FAILED: {ex}"); }
         };
 
-        SetupTray();
+        try { SetupTray(); TraceLog.Write("SetupTray OK"); }
+        catch (Exception ex) { TraceLog.Write($"SetupTray FAILED: {ex}"); }
 
-        // Sync startup registry with setting
-        StartupService.SetRunOnStartup(_db.Settings.RunOnStartup);
+        // Create the HWND after the message loop starts so clipboard monitoring
+        // begins at launch (without this, it only starts when the window is first shown).
+        // Deferred via BeginInvoke so the tray icon appears immediately.
+        Dispatcher.BeginInvoke(() =>
+        {
+            try
+            {
+                new System.Windows.Interop.WindowInteropHelper(_window).EnsureHandle();
+                TraceLog.Write("EnsureHandle OK — clipboard monitor active");
+            }
+            catch (Exception ex) { TraceLog.Write($"EnsureHandle FAILED: {ex}"); }
+        });
 
-        // Don't show window on startup — live in tray only
+        // Sync startup setting with registry (installer may have set it)
+        var registryHasStartup = StartupService.IsRunOnStartup();
+        if (registryHasStartup && !_db.Settings.RunOnStartup)
+        {
+            _db.Settings.RunOnStartup = true;
+            _data.Save(_db);
+        }
+        else if (!registryHasStartup && _db.Settings.RunOnStartup)
+        {
+            StartupService.SetRunOnStartup(true);
+        }
     }
 
     private void SetupTray()
