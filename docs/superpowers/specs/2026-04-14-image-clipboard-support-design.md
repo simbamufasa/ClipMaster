@@ -25,7 +25,7 @@ ClipMaster captures only text from the clipboard. When a user copies an image (f
 - Duplicate image detection (pixel comparison is expensive; duplicate screenshots stack normally).
 - Sensitive masking for images.
 - Regex/transform rules for images.
-- Text search matching image clips (no text content to match).
+- Text search matching image clips — when a search query is active, image clips are hidden entirely (they have no text content to match against). When the search box is empty, image clips appear in the stack normally.
 - Size/dimension filtering of captured images.
 
 ---

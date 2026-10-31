@@ -7,3 +7,6 @@ obj/
 installer/
 .worktrees/
 .superpowers/
+
+# Workspace per-project bookkeeping
+.workspace/
