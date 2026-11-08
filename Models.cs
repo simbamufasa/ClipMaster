@@ -13,6 +13,8 @@ public class ClipEntry
     [JsonPropertyName("tags")]         public List<string> Tags         { get; set; } = [];
     [JsonPropertyName("isSensitive")]  public bool         IsSensitive  { get; set; }
     [JsonPropertyName("appliedRules")] public List<string> AppliedRules { get; set; } = [];
+    [JsonPropertyName("isRich")]       public bool         IsRich       { get; set; }
+    [JsonPropertyName("richHtml")]     public string?      RichHtml     { get; set; }
     [JsonPropertyName("isImage")]      public bool         IsImage      { get; set; }
     [JsonPropertyName("imagePath")]    public string?      ImagePath    { get; set; }
     [JsonPropertyName("imageWidth")]   public int          ImageWidth   { get; set; }
