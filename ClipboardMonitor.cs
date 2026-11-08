@@ -16,6 +16,7 @@ public class ClipboardMonitor : IDisposable
 
     public event Action<string>?       NewClipText;
     public event Action<BitmapSource>? NewClipImage;
+    public event Action<string, string>? NewClipRich;
 
     private HwndSource?     _source;
     private IntPtr          _hwnd;
@@ -47,6 +48,20 @@ public class ClipboardMonitor : IDisposable
     {
         try
         {
+            // Capture HTML together with its plain-text fallback as one composite item.
+            // Plain browser text continues through the legacy text path unless the HTML
+            // contains inline imagery (including image-bearing tables/fragments).
+            if (System.Windows.Clipboard.ContainsText(System.Windows.TextDataFormat.Html))
+            {
+                var html = System.Windows.Clipboard.GetText(System.Windows.TextDataFormat.Html);
+                if (!string.IsNullOrEmpty(html) && System.Text.RegularExpressions.Regex.IsMatch(html, @"<img\\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                {
+                    var plain = System.Windows.Clipboard.ContainsText()
+                        ? System.Windows.Clipboard.GetText() : "";
+                    NewClipRich?.Invoke(plain, html);
+                    return;
+                }
+            }
             if (System.Windows.Clipboard.ContainsText())
             {
                 var text = System.Windows.Clipboard.GetText();
