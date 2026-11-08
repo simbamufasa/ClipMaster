@@ -53,6 +53,7 @@ public partial class App : Application
 
                 _clip.NewClipText    += OnNewClip;
                 _clip.NewClipImage   += OnNewClipImage;
+                _clip.NewClipRich    += OnNewClipRich;
                 _hotkey.HotkeyPressed += ToggleWindow;
 
                 // Register hotkey; fall back if taken
@@ -200,6 +201,59 @@ public partial class App : Application
         _hotkey.Register(newHotkey);
     }
 
+    private void OnNewClipRich(string plain, string html)
+    {
+        if (_suppressing) return;
+        // HTML is data, never run regex replacement rules over its markup.
+        if (html.Length > 8_000_000) return;
+        var clip = new ClipEntry
+        {
+            Id = $"rich_{Guid.NewGuid():N}",
+            Raw = plain,
+            Text = plain,
+            IsRich = true,
+            RichHtml = html,
+            CopiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            IsSensitive = _db.Settings.MaskPasswords && DataService.LooksLikePassword(plain),
+        };
+        _db.Clips.Insert(0, clip);
+        _data.QueueSave(_db);
+        if (_window?.IsVisible == true) _window.RefreshClips(_db.Clips);
+    }
+
+    public void OnCopyRichClip(string clipId)
+    {
+        var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId && c.IsRich);
+        if (clip?.RichHtml == null) return;
+        _suppressing = true;
+        try
+        {
+            var data = new System.Windows.DataObject();
+            data.SetData(System.Windows.DataFormats.Html, clip.RichHtml);
+            data.SetData(System.Windows.DataFormats.UnicodeText, clip.Text ?? "");
+            System.Windows.Clipboard.SetDataObject(data, true);
+        }
+        catch (Exception ex) { TraceLog.Write($"OnCopyRichClip FAILED: {ex}"); }
+        finally { _suppressing = false; }
+    }
+
+    private bool TrySetRichClipboardAndHide(ClipEntry clip)
+    {
+        if (clip.RichHtml == null) return false;
+        _suppressing = true;
+        try
+        {
+            var data = new System.Windows.DataObject();
+            data.SetData(System.Windows.DataFormats.Html, clip.RichHtml);
+            data.SetData(System.Windows.DataFormats.UnicodeText, clip.Text ?? "");
+            System.Windows.Clipboard.SetDataObject(data, true);
+            _window?.Hide();
+            return true;
+        }
+        catch (Exception ex) { TraceLog.Write($"TrySetRichClipboardAndHide FAILED: {ex}"); return false; }
+        finally { _suppressing = false; }
+    }
+
     private void OnNewClip(string text)
     {
         if (_suppressing) return;
@@ -296,7 +350,7 @@ public partial class App : Application
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
         if (string.IsNullOrEmpty(text)) return;
 
-        if (!TrySetClipboardAndHide(text)) return;
+        if (!(clip.IsRich ? TrySetRichClipboardAndHide(clip) : TrySetClipboardAndHide(text))) return;
         Task.Run(() => PasteService.Paste(150));
     }
 
@@ -308,7 +362,7 @@ public partial class App : Application
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
         if (string.IsNullOrEmpty(text)) return;
 
-        if (!TrySetClipboardAndHide(text)) return;
+        if (!(clip.IsRich ? TrySetRichClipboardAndHide(clip) : TrySetClipboardAndHide(text))) return;
         Task.Run(() => PasteService.Paste(150));
     }
 
