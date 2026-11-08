@@ -1,0 +1,17 @@
+name: Rich clipboard Windows build
+on:
+  push:
+    branches: [feature/rich-content-clipboard]
+  pull_request:
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build ClipMaster
+        run: dotnet build ClipMaster.csproj -c Release
+      - name: Run unit tests
+        run: dotnet test ClipMaster.Tests/ClipMaster.Tests.csproj -c Release
