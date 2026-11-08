@@ -52,7 +52,7 @@ Name: "startup"; Description: "Run ClipMaster Rich Preview when Windows &starts"
 
 [Files]
 Source: "bin\Release\net8.0-windows\win-x64\publish\ClipMaster.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "bin\Release\net8.0-windows\win-x64\publish\*.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "bin\Release\net8.0-windows\win-x64\publish\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppDescription}"
