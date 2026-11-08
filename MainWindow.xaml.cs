@@ -422,7 +422,8 @@ public partial class MainWindow : Window
         pasteBtn.Click += (_, _) => ((App)WpfApp.Current).OnPasteClip(clip.Id);
         copyBtn.Click  += (_, _) =>
         {
-            System.Windows.Clipboard.SetText(displayText);
+            if (clip.IsRich) ((App)WpfApp.Current).OnCopyRichClip(clip.Id);
+            else System.Windows.Clipboard.SetText(displayText);
             ShowToast("Copied");
         };
         pinBtn.Click += (_, _) =>
@@ -502,7 +503,7 @@ public partial class MainWindow : Window
                 return mi;
             }
             menu.Items.Add(MI("Paste",        () => ((App)WpfApp.Current).OnPasteClip(clip.Id)));
-            menu.Items.Add(MI("Copy text",    () => { System.Windows.Clipboard.SetText(displayText); ShowToast("Copied"); }));
+            menu.Items.Add(MI(clip.IsRich ? "Copy rich" : "Copy text", () => { if (clip.IsRich) ((App)WpfApp.Current).OnCopyRichClip(clip.Id); else System.Windows.Clipboard.SetText(displayText); ShowToast("Copied"); }));
             menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.QueueSave(_db); RenderStack(); }));
             menu.Items.Add(MI("Manage tags…", () => OpenTagDialog(clip)));
             AddTransformSubmenu(menu, clip);
@@ -1125,7 +1126,8 @@ public partial class MainWindow : Window
     {
         var clip = _db.Clips.FirstOrDefault(c => c.Id == _detailClipId);
         if (clip == null) return;
-        System.Windows.Clipboard.SetText(!string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw);
+        if (clip.IsRich) ((App)WpfApp.Current).OnCopyRichClip(clip.Id);
+        else System.Windows.Clipboard.SetText(!string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw);
         ShowToast("Copied");
     }
 
