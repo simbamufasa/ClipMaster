@@ -1,12 +1,12 @@
-#define MyAppName "ClipMaster"
-#define MyAppVersion "1.3.0"
+#define MyAppName "ClipMaster Rich Preview"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "ClipMaster"
 #define MyAppExeName "ClipMaster.exe"
 #define MyAppDescription "A power-user clipboard manager for Windows"
-#define MyAppURL "https://github.com/clipmaster"
+#define MyAppURL "https://github.com/simbamufasa/ClipMaster"
 
 [Setup]
-AppId={{E8C1A3B7-4F2D-4A6E-9B8C-1D3E5F7A9B0C}
+AppId={{56D60A7B-63CD-4AD5-B2B1-AC7088DF03E1}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -17,7 +17,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer
-OutputBaseFilename=ClipMaster-Setup-{#MyAppVersion}
+OutputBaseFilename=ClipMaster-Rich-Preview-Setup-{#MyAppVersion}
 SetupIconFile=Assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
@@ -48,7 +48,7 @@ WelcomeLabel2=This will install [name/ver] on your computer.%n%nClipMaster is a 
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
-Name: "startup"; Description: "Run ClipMaster when Windows &starts"; GroupDescription: "Startup:"; Flags: checkedonce
+Name: "startup"; Description: "Run ClipMaster Rich Preview when Windows &starts"; GroupDescription: "Startup:"; Flags: unchecked
 
 [Files]
 Source: "bin\Release\net8.0-windows\win-x64\publish\ClipMaster.exe"; DestDir: "{app}"; Flags: ignoreversion
