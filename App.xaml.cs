@@ -348,7 +348,7 @@ public partial class App : Application
 
         _data.PromoteClip(_db, clipId);
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text) && !clip.IsRich) return;
 
         if (!(clip.IsRich ? TrySetRichClipboardAndHide(clip) : TrySetClipboardAndHide(text))) return;
         Task.Run(() => PasteService.Paste(150));
@@ -360,7 +360,7 @@ public partial class App : Application
         if (clip == null) return;
 
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text) && !clip.IsRich) return;
 
         if (!(clip.IsRich ? TrySetRichClipboardAndHide(clip) : TrySetClipboardAndHide(text))) return;
         Task.Run(() => PasteService.Paste(150));
