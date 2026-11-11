@@ -335,6 +335,7 @@ public partial class MainWindow : Window
             Margin            = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
+        if (clip.IsRich)                  badgesPanel.Children.Add(MakeBadge(RichClipboard.Label(clip.RichImages), "#1a2e3a", "#5bb8d4"));
         if (clip.Pinned)                  badgesPanel.Children.Add(MakeBadge("pinned",      "#3d3880", "#a89ef7"));
         if (clip.IsSensitive)             badgesPanel.Children.Add(MakeBadge("sensitive",   "#4d1f1f", "#e05252"));
         if (clip.AppliedRules?.Count > 0) badgesPanel.Children.Add(MakeBadge("transformed", "#1a3a2a", "#4caf82"));
@@ -378,8 +379,9 @@ public partial class MainWindow : Window
         header.Children.Add(tagsPanel);
         header.Children.Add(metaTb);
 
-        // Clip text
-        var displayText = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+        // Clip text. A rich clip shows its plain text, or a short description when it has none.
+        var displayText = clip.IsRich ? RichClipboard.PreviewText(clip)
+                        : !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
         var isCode = !clip.IsSensitive && _db.Settings.HighlightCode && clip.Language.Length > 0;
         var clipTextTb  = new TextBlock
         {
@@ -422,8 +424,8 @@ public partial class MainWindow : Window
         pasteBtn.Click += (_, _) => ((App)WpfApp.Current).OnPasteClip(clip.Id);
         copyBtn.Click  += (_, _) =>
         {
-            if (clip.IsRich) ((App)WpfApp.Current).OnCopyRichClip(clip.Id);
-            else System.Windows.Clipboard.SetText(displayText);
+            if (clip.IsRich) { ShowToast(((App)WpfApp.Current).OnCopyRichClip(clip.Id) ? "Copied" : "Copy failed"); return; }
+            System.Windows.Clipboard.SetText(displayText);
             ShowToast("Copied");
         };
         pinBtn.Click += (_, _) =>
@@ -437,6 +439,7 @@ public partial class MainWindow : Window
         {
             _db.Clips.Remove(clip);
             _svc.QueueSave(_db);
+            _svc.DeleteClipFiles(clip);
             RenderStack();
         };
 
@@ -447,8 +450,9 @@ public partial class MainWindow : Window
         expandBtn.Click += (_, _) => OpenDetail(clip);
         actions.Children.Add(expandBtn);
 
-        // Manual rule buttons
-        foreach (var rule in _db.Rules.Where(r => r.Enabled && r.Mode == "manual"))
+        // Manual rule buttons. Not for rich clips: their text is one half of a pair with the
+        // HTML, and rewriting it would make the two disagree.
+        foreach (var rule in _db.Rules.Where(r => !clip.IsRich && r.Enabled && r.Mode == "manual"))
         {
             var r   = rule;
             var btn = CardBtn(r.Name, "ActionBtn");
@@ -503,12 +507,17 @@ public partial class MainWindow : Window
                 return mi;
             }
             menu.Items.Add(MI("Paste",        () => ((App)WpfApp.Current).OnPasteClip(clip.Id)));
-            menu.Items.Add(MI(clip.IsRich ? "Copy rich" : "Copy text", () => { if (clip.IsRich) ((App)WpfApp.Current).OnCopyRichClip(clip.Id); else System.Windows.Clipboard.SetText(displayText); ShowToast("Copied"); }));
+            menu.Items.Add(MI(clip.IsRich ? "Copy rich" : "Copy text", () =>
+            {
+                if (clip.IsRich) { ShowToast(((App)WpfApp.Current).OnCopyRichClip(clip.Id) ? "Copied" : "Copy failed"); return; }
+                System.Windows.Clipboard.SetText(displayText);
+                ShowToast("Copied");
+            }));
             menu.Items.Add(MI(clip.Pinned ? "Unpin" : "Pin", () => { clip.Pinned = !clip.Pinned; _svc.QueueSave(_db); RenderStack(); }));
             menu.Items.Add(MI("Manage tags…", () => OpenTagDialog(clip)));
-            AddTransformSubmenu(menu, clip);
+            if (!clip.IsRich) AddTransformSubmenu(menu, clip);
             menu.Items.Add(new Separator());
-            menu.Items.Add(MI("Delete",       () => { _db.Clips.Remove(clip); _svc.QueueSave(_db); RenderStack(); }));
+            menu.Items.Add(MI("Delete",       () => { _db.Clips.Remove(clip); _svc.QueueSave(_db); _svc.DeleteClipFiles(clip); RenderStack(); }));
             card.ContextMenu = menu;
             menu.IsOpen      = true;
         };
@@ -1041,6 +1050,9 @@ public partial class MainWindow : Window
         var maxImgBox = StyledInput(s.MaxImageHistory.ToString(), 80);
         SettingRow("Max image history", "Image clips to keep on disk", maxImgBox);
 
+        var maxRichBox = StyledInput(s.MaxRichHistory.ToString(), 80);
+        SettingRow("Max rich history", "Rich clips (text with images) to keep on disk", maxRichBox);
+
         // Data
         SectionHeader("DATA");
 
@@ -1053,9 +1065,9 @@ public partial class MainWindow : Window
                 if (WpfMessageBox.Show("Clear all unpinned history? Cannot be undone.",
                     "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
                 {
-                    var imagesToDelete = _db.Clips.Where(c => !c.Pinned && c.IsImage).ToList();
-                    foreach (var img in imagesToDelete)
-                        _svc.DeleteImageFile(img.ImagePath);
+                    // Image and rich clips own a file each; it goes with the entry.
+                    foreach (var owner in _db.Clips.Where(c => !c.Pinned && (c.IsImage || c.IsRich)).ToList())
+                        _svc.DeleteClipFiles(owner);
                     _db.Clips = _db.Clips.Where(c => c.Pinned).ToList();
                     _svc.QueueSave(_db);
                     RenderStack();
@@ -1081,7 +1093,9 @@ public partial class MainWindow : Window
             s.AutoApplyRules  = autoRulesCb.IsChecked == true;
             s.RunOnStartup    = startupCb.IsChecked == true;
             s.MaxImageHistory = int.TryParse(maxImgBox.Text, out var mi) ? Math.Max(1, mi) : 50;
+            s.MaxRichHistory  = int.TryParse(maxRichBox.Text, out var mr) ? Math.Max(1, mr) : 50;
             _svc.PruneImageHistory(_db);
+            _svc.PruneRichHistory(_db);
             _svc.QueueSave(_db);
             ((App)WpfApp.Current).RehostHotkey(s.Hotkey);
             StartupService.SetRunOnStartup(s.RunOnStartup);
@@ -1107,9 +1121,12 @@ public partial class MainWindow : Window
     {
         var clip = _db.Clips.FirstOrDefault(c => c.Id == _detailClipId);
         if (clip == null) { CloseDetail(); return; }
-        var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+        var text = clip.IsRich ? RichClipboard.PreviewText(clip)
+                 : !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
 
         DetailBadges.Children.Clear();
+        if (clip.IsRich)
+            DetailBadges.Children.Add(MakeBadge(RichClipboard.Label(clip.RichImages), "#1a2e3a", "#5bb8d4"));
         if (_db.Settings.HighlightCode && clip.Language.Length > 0)
             DetailBadges.Children.Add(MakeBadge(clip.Language.ToUpperInvariant(), "#22202e", "#9b8cff"));
 
@@ -1126,8 +1143,8 @@ public partial class MainWindow : Window
     {
         var clip = _db.Clips.FirstOrDefault(c => c.Id == _detailClipId);
         if (clip == null) return;
-        if (clip.IsRich) ((App)WpfApp.Current).OnCopyRichClip(clip.Id);
-        else System.Windows.Clipboard.SetText(!string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw);
+        if (clip.IsRich) { ShowToast(((App)WpfApp.Current).OnCopyRichClip(clip.Id) ? "Copied" : "Copy failed"); return; }
+        System.Windows.Clipboard.SetText(!string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw);
         ShowToast("Copied");
     }
 
@@ -1142,7 +1159,9 @@ public partial class MainWindow : Window
     private void DetailTransform_Click(object sender, RoutedEventArgs e)
     {
         var clip = _db.Clips.FirstOrDefault(c => c.Id == _detailClipId);
-        if (clip != null) ShowTransformMenu(clip, (UIElement)sender);
+        if (clip == null) return;
+        if (clip.IsRich) { ShowToast("Transforms are not available for rich clips"); return; }
+        ShowTransformMenu(clip, (UIElement)sender);
     }
 
     private void ApplyTransform(ClipEntry clip, Transform t)
