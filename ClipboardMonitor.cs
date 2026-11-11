@@ -6,6 +6,24 @@ using System.Windows.Threading;
 
 namespace ClipMaster;
 
+public enum ClipboardCaptureKind
+{
+    /// <summary>Nothing to capture (empty, unsupported, or ClipMaster's own write).</summary>
+    None,
+    Text,
+    Image,
+    /// <summary>HTML with images plus its plain text, as one item.</summary>
+    Rich,
+    /// <summary>Another program holds the clipboard; try again shortly.</summary>
+    Busy,
+}
+
+public sealed record ClipboardCapture(
+    ClipboardCaptureKind Kind,
+    string?       Text  = null,
+    BitmapSource? Image = null,
+    RichPayload?  Rich  = null);
+
 public class ClipboardMonitor : IDisposable
 {
     private const int WM_CLIPBOARDUPDATE = 0x031D;
@@ -16,6 +34,16 @@ public class ClipboardMonitor : IDisposable
 
     public event Action<string>?       NewClipText;
     public event Action<BitmapSource>? NewClipImage;
+    public event Action<RichPayload>?  NewClipRich;
+
+    /// <summary>
+    /// Clipboard sequence number of a write ClipMaster made itself (restoring a rich clip). The
+    /// update notification for that write is ignored, so pasting a clip does not capture it again.
+    /// </summary>
+    public uint? IgnoredSequence { get; set; }
+
+    /// <summary>HTML larger than this is captured as plain text only.</summary>
+    public int MaxRichHtmlBytes { get; set; } = RichClipboard.MaxHtmlBytes;
 
     private HwndSource?     _source;
     private IntPtr          _hwnd;
@@ -47,18 +75,18 @@ public class ClipboardMonitor : IDisposable
     {
         try
         {
-            if (System.Windows.Clipboard.ContainsText())
+            var capture = Capture();
+            if (capture.Kind == ClipboardCaptureKind.Busy)
             {
-                var text = System.Windows.Clipboard.GetText();
-                if (!string.IsNullOrEmpty(text))
-                    NewClipText?.Invoke(text);
+                if (attempt < MaxRetries) { ScheduleRetry(attempt + 1); return; }
+                // Still locked for the rich read: do not lose the copy, take the text.
+                capture = Capture(tryRich: false);
             }
-            else
+            switch (capture.Kind)
             {
-                // Text takes priority. Only check for images when no text is present.
-                var image = TryGetClipboardImage();
-                if (image != null)
-                    NewClipImage?.Invoke(image);
+                case ClipboardCaptureKind.Rich:  NewClipRich?.Invoke(capture.Rich!);   break;
+                case ClipboardCaptureKind.Text:  NewClipText?.Invoke(capture.Text!);   break;
+                case ClipboardCaptureKind.Image: NewClipImage?.Invoke(capture.Image!); break;
             }
         }
         catch (COMException)
@@ -67,6 +95,44 @@ public class ClipboardMonitor : IDisposable
                 ScheduleRetry(attempt + 1);
         }
         catch { /* unrecoverable — drop this update */ }
+    }
+
+    /// <summary>
+    /// Decides what the clipboard holds right now and reads it. Must run on an STA thread (WPF).
+    ///
+    /// HTML that contains at least one image is captured together with its plain text as one
+    /// rich item. Everything else — including HTML without images, HTML over the size limit and
+    /// any failure in the rich read — goes down the legacy path unchanged: text first, then image.
+    /// May throw COMException when the clipboard is locked (the caller retries).
+    /// </summary>
+    public ClipboardCapture Capture(bool tryRich = true)
+    {
+        if (IgnoredSequence is { } own && own != 0 && RichClipboard.CurrentSequence() == own)
+            return new ClipboardCapture(ClipboardCaptureKind.None);
+
+        if (tryRich)
+        {
+            var status = RichClipboard.TryRead(out var payload, MaxRichHtmlBytes);
+            if (status == RichReadStatus.Rich) return new ClipboardCapture(ClipboardCaptureKind.Rich, Rich: payload);
+            if (status == RichReadStatus.Busy) return new ClipboardCapture(ClipboardCaptureKind.Busy);
+            if (status == RichReadStatus.TooLarge)
+                TraceLog.Write("Rich clip over the size limit — capturing its plain text only");
+        }
+
+        if (System.Windows.Clipboard.ContainsText())
+        {
+            var text = System.Windows.Clipboard.GetText();
+            if (!string.IsNullOrEmpty(text))
+                return new ClipboardCapture(ClipboardCaptureKind.Text, Text: text);
+        }
+        else
+        {
+            // Text takes priority. Only check for images when no text is present.
+            var image = TryGetClipboardImage();
+            if (image != null)
+                return new ClipboardCapture(ClipboardCaptureKind.Image, Image: image);
+        }
+        return new ClipboardCapture(ClipboardCaptureKind.None);
     }
 
     private void ScheduleRetry(int nextAttempt)

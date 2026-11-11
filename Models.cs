@@ -13,6 +13,19 @@ public class ClipEntry
     [JsonPropertyName("tags")]         public List<string> Tags         { get; set; } = [];
     [JsonPropertyName("isSensitive")]  public bool         IsSensitive  { get; set; }
     [JsonPropertyName("appliedRules")] public List<string> AppliedRules { get; set; } = [];
+    [JsonPropertyName("isRich")]       public bool         IsRich       { get; set; }
+    // Legacy: the first preview builds stored the HTML inline. It is moved to a side file on load.
+    [JsonPropertyName("richHtml"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RichHtml { get; set; }
+    // Rich clips keep their HTML in an encrypted side file (rich/<id>.bin), like images keep a PNG.
+    [JsonPropertyName("richPath"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RichPath { get; set; }
+    [JsonPropertyName("richHash"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RichHash { get; set; }
+    [JsonPropertyName("richBytes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long RichBytes { get; set; }
+    [JsonPropertyName("richImages"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int RichImages { get; set; }
     [JsonPropertyName("isImage")]      public bool         IsImage      { get; set; }
     [JsonPropertyName("imagePath")]    public string?      ImagePath    { get; set; }
     [JsonPropertyName("imageWidth")]   public int          ImageWidth   { get; set; }
@@ -42,6 +55,7 @@ public class AppSettings
     [JsonPropertyName("windowHeight")]    public int    WindowHeight    { get; set; } = 640;
     [JsonPropertyName("runOnStartup")]    public bool   RunOnStartup    { get; set; }
     [JsonPropertyName("maxImageHistory")] public int    MaxImageHistory { get; set; } = 50;
+    [JsonPropertyName("maxRichHistory")]  public int    MaxRichHistory  { get; set; } = 50;
     [JsonPropertyName("highlightCode")] public bool   HighlightCode   { get; set; } = true;
 }
 

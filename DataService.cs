@@ -6,7 +6,8 @@ namespace ClipMaster;
 
 public static class TraceLog
 {
-    private static readonly string LogFile = Path.Combine(
+    /// <summary>Where the log goes. Tests point this away from the user's data directory.</summary>
+    public static string LogFile { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".clipmaster", "debug.log");
 
     public static void Write(string message)
@@ -20,6 +21,16 @@ public static class TraceLog
     }
 }
 
+public enum RichAddResult
+{
+    /// <summary>A new rich entry was stored.</summary>
+    Added,
+    /// <summary>The same content was already in history; that entry was moved to the top.</summary>
+    Promoted,
+    /// <summary>The HTML could not be stored. Nothing changed; capture the plain text instead.</summary>
+    Failed,
+}
+
 public class DataService
 {
     private readonly string _dataDir;
@@ -27,6 +38,10 @@ public class DataService
     private readonly string _binFile;
     private readonly string _binTmp;
     private readonly string _imagesDir;
+    private readonly string _richDir;
+
+    private const string RichFolder = "rich";
+    private readonly object _richLock = new();   // one rich capture at a time (hash → dedupe → write)
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
@@ -47,6 +62,7 @@ public class DataService
         _binFile   = Path.Combine(_dataDir, "data.bin");
         _binTmp    = Path.Combine(_dataDir, "data.bin.tmp");
         _imagesDir = Path.Combine(_dataDir, "images");
+        _richDir   = Path.Combine(_dataDir, RichFolder);
     }
 
     public AppData Load()
@@ -76,6 +92,9 @@ public class DataService
                     try { File.Delete(_dataFile); }
                     catch { /* best-effort */ }
                 }
+                if (MigrateInlineRich(data)) Save(data);
+                // Only after a successful load: an unreadable database must never cost the files.
+                DeleteOrphanRichFiles(data);
                 return data;
             }
             catch (Exception ex)
@@ -92,6 +111,7 @@ public class DataService
             {
                 var json = File.ReadAllText(_dataFile);
                 var data = JsonSerializer.Deserialize<AppData>(json, JsonOpts) ?? new AppData();
+                MigrateInlineRich(data);
                 Save(data);
                 File.Delete(_dataFile);
                 return data;
@@ -207,6 +227,308 @@ public class DataService
             if (File.Exists(abs)) File.Delete(abs);
         }
         catch (Exception ex) { TraceLog.Write($"DeleteImageFile failed: {ex.Message}"); }
+    }
+
+    // ── Rich clips ──────────────────────────────────────────────────────────
+    //
+    // A rich clip is a normal entry (plain text in Raw/Text, so search, masking and the list
+    // work as for text) whose HTML lives in its own encrypted file, rich/<id>.bin. The HTML
+    // can be tens of megabytes; keeping it out of the database keeps every save small.
+    // The file is read only when the clip is pasted or copied, and deleted with the entry.
+    //
+    // Protection is the same as data.bin — DPAPI for the current Windows user — applied as an
+    // envelope: DPAPI protects a random AES-256 key, and AES-GCM with that key encrypts (and
+    // authenticates) the HTML. DPAPI alone handles about 15 MB/s (measured: 1.3 s for 20 MB,
+    // 19 s for 128 MB, each way), which would freeze every paste of a large clip.
+    //
+    //   "CMR1" | int32 wrapped-key length | DPAPI(key) | 12-byte nonce | 16-byte tag | ciphertext
+
+    private static readonly byte[] RichMagic = "CMR1"u8.ToArray();
+    private const int RichNonceBytes = 12;
+    private const int RichTagBytes   = 16;
+
+    private static byte[] ProtectRich(byte[] html)
+    {
+        var key = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            var wrapped = System.Security.Cryptography.ProtectedData.Protect(
+                key, null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            var prefix = RichMagic.Length + sizeof(int) + wrapped.Length;
+            var header = prefix + RichNonceBytes + RichTagBytes;
+            var output = new byte[header + html.Length];
+
+            RichMagic.CopyTo(output, 0);
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(RichMagic.Length), wrapped.Length);
+            wrapped.CopyTo(output, RichMagic.Length + sizeof(int));
+            var nonce = output.AsSpan(prefix, RichNonceBytes);
+            System.Security.Cryptography.RandomNumberGenerator.Fill(nonce);
+
+            using var aes = new System.Security.Cryptography.AesGcm(key, RichTagBytes);
+            aes.Encrypt(nonce, html, output.AsSpan(header), output.AsSpan(prefix + RichNonceBytes, RichTagBytes),
+                        associatedData: output.AsSpan(0, prefix));
+            return output;
+        }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(key); }
+    }
+
+    // Throws when the file is not one of ours, was written for another user, or was altered.
+    private static byte[] UnprotectRich(byte[] file)
+    {
+        var fixedPart = RichMagic.Length + sizeof(int);
+        if (file.Length < fixedPart || !file.AsSpan(0, RichMagic.Length).SequenceEqual(RichMagic))
+            throw new InvalidDataException("not a rich clip file");
+        var wrappedLength = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(file.AsSpan(RichMagic.Length));
+        var prefix = fixedPart + wrappedLength;
+        var header = prefix + RichNonceBytes + RichTagBytes;
+        if (wrappedLength <= 0 || wrappedLength > 4096 || file.Length < header)
+            throw new InvalidDataException("damaged rich clip file");
+
+        var key = System.Security.Cryptography.ProtectedData.Unprotect(
+            file.AsSpan(fixedPart, wrappedLength).ToArray(), null, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+        try
+        {
+            var html = new byte[file.Length - header];
+            using var aes = new System.Security.Cryptography.AesGcm(key, RichTagBytes);
+            aes.Decrypt(file.AsSpan(prefix, RichNonceBytes), file.AsSpan(header), file.AsSpan(prefix + RichNonceBytes, RichTagBytes),
+                        html, associatedData: file.AsSpan(0, prefix));
+            return html;
+        }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(key); }
+    }
+
+    private string? ResolveRichPath(string? relPath)
+    {
+        if (string.IsNullOrEmpty(relPath)) return null;
+        try
+        {
+            var root = Path.GetFullPath(_richDir) + Path.DirectorySeparatorChar;
+            var abs  = Path.GetFullPath(Path.Combine(_dataDir, relPath));
+            return abs.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? abs : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Background-thread safe: encrypts the HTML bytes for the current Windows user and writes
+    /// them atomically to rich/&lt;id&gt;.bin. Does NOT touch the in-memory model. Returns null on failure.
+    /// </summary>
+    public (string Id, string RelPath, long Bytes)? WriteRichFile(byte[] html)
+    {
+        try
+        {
+            Directory.CreateDirectory(_richDir);
+
+            var id      = $"rich_{Guid.NewGuid():N}";
+            var relPath = $"{RichFolder}/{id}.bin";
+            var absPath = Path.Combine(_richDir, $"{id}.bin");
+            var tmpPath = absPath + ".tmp";
+
+            var cipher = ProtectRich(html);
+            try
+            {
+                File.WriteAllBytes(tmpPath, cipher);
+                File.Move(tmpPath, absPath, overwrite: true);
+            }
+            catch
+            {
+                try { File.Delete(tmpPath); } catch { /* best-effort */ }
+                throw;
+            }
+            return (id, relPath, html.LongLength);
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"WriteRichFile FAILED: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The HTML bytes of a rich clip, read and decrypted on demand. Null when the clip has no
+    /// stored HTML or it cannot be read; the caller then falls back to the clip's plain text.
+    /// </summary>
+    public byte[]? ReadRichHtml(ClipEntry clip)
+    {
+        if (!clip.IsRich) return null;
+        try
+        {
+            var abs = ResolveRichPath(clip.RichPath);
+            if (abs != null && File.Exists(abs))
+            {
+                return UnprotectRich(File.ReadAllBytes(abs));
+            }
+        }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"ReadRichHtml FAILED: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+        // An entry from the first preview builds whose migration to a side file failed.
+        return clip.RichHtml != null ? System.Text.Encoding.UTF8.GetBytes(clip.RichHtml) : null;
+    }
+
+    public void DeleteRichFile(string? relPath)
+    {
+        try
+        {
+            var abs = ResolveRichPath(relPath);
+            if (abs != null && File.Exists(abs)) File.Delete(abs);
+        }
+        catch (Exception ex) { TraceLog.Write($"DeleteRichFile failed: {ex.Message}"); }
+    }
+
+    /// <summary>Deletes whatever files an entry owns. Call when the entry leaves the history.</summary>
+    public void DeleteClipFiles(ClipEntry clip)
+    {
+        if (clip.IsImage) DeleteImageFile(clip.ImagePath);
+        if (clip.IsRich)  DeleteRichFile(clip.RichPath);
+    }
+
+    /// <summary>
+    /// Keeps every pinned rich clip and the newest MaxRichHistory unpinned ones, like
+    /// <see cref="PruneImageHistory"/> does for images. Rich clips are large, so they get their
+    /// own (smaller) limit on top of the general history limit.
+    /// </summary>
+    public void PruneRichHistory(AppData data)
+    {
+        var max  = Math.Max(1, data.Settings.MaxRichHistory);
+        var kept = data.Clips.Where(c => c.IsRich && !c.Pinned).Take(max).Select(c => c.Id).ToHashSet();
+
+        var toDelete = data.Clips.Where(c => c.IsRich && !c.Pinned && !kept.Contains(c.Id)).ToList();
+        foreach (var old in toDelete)
+        {
+            data.Clips.Remove(old);
+            DeleteRichFile(old.RichPath);
+        }
+    }
+
+    /// <summary>
+    /// The general history limit: every pinned clip, then the newest MaxHistory unpinned ones.
+    /// Rich clips that fall off the end lose their side file.
+    /// </summary>
+    private void TrimHistory(AppData data)
+    {
+        var max      = data.Settings.MaxHistory;
+        var pinned   = data.Clips.Where(c => c.Pinned).ToList();
+        var unpinned = data.Clips.Where(c => !c.Pinned).ToList();
+        foreach (var dropped in unpinned.Skip(Math.Max(0, max)).Where(c => c.IsRich))
+            DeleteRichFile(dropped.RichPath);
+        data.Clips = [.. pinned, .. unpinned.Take(max)];
+    }
+
+    /// <summary>
+    /// Stores a captured rich item. The same content (HTML bytes and text) already in history is
+    /// promoted instead: moved to the top with its copy count incremented, like a repeated text
+    /// copy. Auto-transform rules are never applied; the plain text only decides masking.
+    ///
+    /// Hashing, encryption and the file write run on the calling thread, which may be a
+    /// background thread; every read or change of the model goes through <paramref name="onModel"/>
+    /// (pass a dispatcher invoke when calling from a background thread).
+    /// </summary>
+    public RichAddResult AddRichClip(AppData data, RichPayload payload, Action<Action>? onModel = null)
+    {
+        onModel ??= action => action();
+        lock (_richLock)
+        {
+            var hash = RichClipboard.ContentHash(payload.Html, payload.Text);
+
+            var promoted = false;
+            onModel(() => promoted = PromoteRichByHash(data, hash));
+            if (promoted) return RichAddResult.Promoted;
+
+            var written = WriteRichFile(payload.Html);
+            if (written == null) return RichAddResult.Failed;
+
+            onModel(() =>
+            {
+                data.Clips.Insert(0, new ClipEntry
+                {
+                    Id          = written.Value.Id,
+                    Raw         = payload.Text,
+                    Text        = payload.Text,
+                    IsRich      = true,
+                    RichPath    = written.Value.RelPath,
+                    RichBytes   = written.Value.Bytes,
+                    RichImages  = payload.ImageCount,
+                    RichHash    = hash,
+                    CopiedAt    = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    CopyCount   = 1,
+                    IsSensitive = data.Settings.MaskPasswords && LooksLikePassword(payload.Text),
+                });
+                PruneRichHistory(data);
+                TrimHistory(data);
+                QueueSave(data);
+            });
+            return RichAddResult.Added;
+        }
+    }
+
+    private bool PromoteRichByHash(AppData data, string hash)
+    {
+        var idx = data.Clips.FindIndex(c => c.IsRich && c.RichHash == hash);
+        if (idx < 0) return false;
+        var clip = data.Clips[idx];
+        // The entry is only as good as its file. If the file is gone, store the content again.
+        var abs = ResolveRichPath(clip.RichPath);
+        if (abs == null || !File.Exists(abs)) return false;
+
+        data.Clips.RemoveAt(idx);
+        clip.CopiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        clip.CopyCount++;
+        data.Clips.Insert(0, clip);
+        QueueSave(data);
+        return true;
+    }
+
+    /// <summary>
+    /// Moves HTML that the first preview builds stored inline in the database into side files.
+    /// Returns true when the model changed. An entry whose file cannot be written keeps its
+    /// inline HTML and still pastes.
+    /// </summary>
+    private bool MigrateInlineRich(AppData data)
+    {
+        var changed = false;
+        foreach (var clip in data.Clips.Where(c => c.RichHtml != null))
+        {
+            if (!clip.IsRich) { clip.RichHtml = null; changed = true; continue; }
+            // WPF decoded the clipboard bytes as UTF-8 up to the NUL; encoding gives them back.
+            var html    = System.Text.Encoding.UTF8.GetBytes(clip.RichHtml!);
+            var written = WriteRichFile(html);
+            if (written == null) continue;
+            clip.RichPath   = written.Value.RelPath;
+            clip.RichBytes  = written.Value.Bytes;
+            clip.RichImages = RichClipboard.CountImages(html);
+            clip.RichHash   = RichClipboard.ContentHash(html, clip.Raw);
+            clip.RichHtml   = null;
+            changed = true;
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// Removes rich files no entry refers to: left by a crash between writing the file and saving
+    /// the database, or by an older ClipMaster that rewrote the database without the rich fields.
+    /// </summary>
+    private void DeleteOrphanRichFiles(AppData data)
+    {
+        try
+        {
+            if (!Directory.Exists(_richDir)) return;
+            var referenced = data.Clips
+                .Select(c => ResolveRichPath(c.RichPath))
+                .Where(p => p != null)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in Directory.EnumerateFiles(_richDir, "rich_*"))
+            {
+                var ext = Path.GetExtension(file);
+                if (ext != ".bin" && ext != ".tmp") continue;
+                if (referenced.Contains(Path.GetFullPath(file))) continue;
+                try { File.Delete(file); }
+                catch { /* best-effort */ }
+            }
+        }
+        catch (Exception ex) { TraceLog.Write($"DeleteOrphanRichFiles failed: {ex.Message}"); }
     }
 
     public void PruneImageHistory(AppData data)
@@ -349,7 +671,8 @@ public class DataService
         if (!isSensitive && data.Settings.AutoApplyRules)
             (finalText, applied) = ApplyAutoRules(rawText, data.Rules);
 
-        var existing = data.Clips.FindIndex(c => c.Raw == rawText);
+        // A rich clip with the same plain text is a different item: never merge text into it.
+        var existing = data.Clips.FindIndex(c => !c.IsRich && c.Raw == rawText);
         if (existing >= 0)
         {
             var clip = data.Clips[existing];
@@ -376,10 +699,7 @@ public class DataService
             });
         }
 
-        var max      = data.Settings.MaxHistory;
-        var pinned   = data.Clips.Where(c => c.Pinned).ToList();
-        var unpinned = data.Clips.Where(c => !c.Pinned).Take(max).ToList();
-        data.Clips   = [.. pinned, .. unpinned];
+        TrimHistory(data);
 
         QueueSave(data);
         return (finalText, finalText != rawText);

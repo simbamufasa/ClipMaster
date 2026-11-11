@@ -12,6 +12,7 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="ClipMaster.Tests\**" />
