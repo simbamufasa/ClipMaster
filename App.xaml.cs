@@ -21,6 +21,7 @@ public partial class App : Application
     private string  _lastClip = "";
     private bool    _suppressing;   // prevents re-entrant clipboard handling
     private long    _lastImageCapture;  // ms timestamp — debounces duplicate WM_CLIPBOARDUPDATE from Snipping Tool
+    private uint    _lastRichSequence;  // clipboard sequence number of the last rich capture
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -201,57 +202,92 @@ public partial class App : Application
         _hotkey.Register(newHotkey);
     }
 
-    private void OnNewClipRich(string plain, string html)
+    private void OnNewClipRich(RichPayload payload)
     {
         if (_suppressing) return;
-        // HTML is data, never run regex replacement rules over its markup.
-        if (html.Length > 8_000_000) return;
-        var clip = new ClipEntry
+        // One clipboard change can be announced more than once; store it once.
+        if (payload.Sequence != 0 && payload.Sequence == _lastRichSequence) return;
+        _lastRichSequence = payload.Sequence;
+        _lastClip = "";   // a later copy of the previous text is a new copy again
+
+        // The HTML is data: regex rules are never run over it or over its text. Hashing,
+        // encryption and the file write happen off the UI thread; the model is only touched
+        // through the dispatcher.
+        Task.Run(() =>
         {
-            Id = $"rich_{Guid.NewGuid():N}",
-            Raw = plain,
-            Text = plain,
-            IsRich = true,
-            RichHtml = html,
-            CopiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            IsSensitive = _db.Settings.MaskPasswords && DataService.LooksLikePassword(plain),
-        };
-        _db.Clips.Insert(0, clip);
-        _data.QueueSave(_db);
-        if (_window?.IsVisible == true) _window.RefreshClips(_db.Clips);
+            RichAddResult result;
+            try { result = _data.AddRichClip(_db, payload, action => Dispatcher.Invoke(action)); }
+            catch (Exception ex)
+            {
+                TraceLog.Write($"OnNewClipRich FAILED: {ex.GetType().Name}: {ex.Message}");
+                result = RichAddResult.Failed;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                if (result == RichAddResult.Failed)
+                {
+                    // Never lose the copy: keep its plain text the way the text path would.
+                    if (!string.IsNullOrEmpty(payload.Text)) OnNewClip(payload.Text);
+                    return;
+                }
+                if (_window?.IsVisible == true) _window.RefreshClips(_db.Clips);
+            });
+        });
     }
 
-    public void OnCopyRichClip(string clipId)
+    /// <summary>
+    /// Puts a rich clip back on the clipboard as the HTML + text pair it was captured as. When
+    /// its HTML cannot be read any more, the plain text is copied instead. Returns false when
+    /// nothing could be placed on the clipboard.
+    /// </summary>
+    public bool OnCopyRichClip(string clipId)
     {
         var clip = _db.Clips.FirstOrDefault(c => c.Id == clipId && c.IsRich);
-        if (clip?.RichHtml == null) return;
-        _suppressing = true;
+        if (clip == null) return false;
+        if (TrySetRichClipboard(clip)) return true;
+
+        var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
+        if (string.IsNullOrEmpty(text)) return false;
+        try { System.Windows.Clipboard.SetText(text); return true; }
+        catch (Exception ex) { TraceLog.Write($"OnCopyRichClip text fallback FAILED: {ex.Message}"); return false; }
+    }
+
+    private bool TrySetRichClipboard(ClipEntry clip)
+    {
         try
         {
-            var data = new System.Windows.DataObject();
-            data.SetData(System.Windows.DataFormats.Html, clip.RichHtml);
-            data.SetData(System.Windows.DataFormats.UnicodeText, clip.Text ?? "");
-            System.Windows.Clipboard.SetDataObject(data, true);
+            var sequence = RichClipboard.Restore(_data, clip);
+            if (sequence == null)
+            {
+                TraceLog.Write($"Rich clip {clip.Id} has no readable HTML — using its text");
+                return false;
+            }
+            // The update notification for this write arrives after we return; the monitor
+            // recognises it by its sequence number and does not capture it again.
+            _clip.IgnoredSequence = sequence;
+            _lastClip = "";
+            return true;
         }
-        catch (Exception ex) { TraceLog.Write($"OnCopyRichClip FAILED: {ex}"); }
-        finally { _suppressing = false; }
+        catch (Exception ex)
+        {
+            TraceLog.Write($"TrySetRichClipboard FAILED: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
     }
 
     private bool TrySetRichClipboardAndHide(ClipEntry clip)
     {
-        if (clip.RichHtml == null) return false;
-        _suppressing = true;
-        try
-        {
-            var data = new System.Windows.DataObject();
-            data.SetData(System.Windows.DataFormats.Html, clip.RichHtml);
-            data.SetData(System.Windows.DataFormats.UnicodeText, clip.Text ?? "");
-            System.Windows.Clipboard.SetDataObject(data, true);
-            _window?.Hide();
-            return true;
-        }
-        catch (Exception ex) { TraceLog.Write($"TrySetRichClipboardAndHide FAILED: {ex}"); return false; }
-        finally { _suppressing = false; }
+        if (!TrySetRichClipboard(clip)) return false;
+        _window?.Hide();
+        return true;
+    }
+
+    // Rich clips paste as rich; if their HTML is unavailable they paste as their plain text.
+    private bool TrySetClipboardForPaste(ClipEntry clip, string text)
+    {
+        if (clip.IsRich && TrySetRichClipboardAndHide(clip)) return true;
+        return !string.IsNullOrEmpty(text) && TrySetClipboardAndHide(text);
     }
 
     private void OnNewClip(string text)
@@ -350,7 +386,7 @@ public partial class App : Application
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
         if (string.IsNullOrEmpty(text) && !clip.IsRich) return;
 
-        if (!(clip.IsRich ? TrySetRichClipboardAndHide(clip) : TrySetClipboardAndHide(text))) return;
+        if (!TrySetClipboardForPaste(clip, text)) return;
         Task.Run(() => PasteService.Paste(150));
     }
 
@@ -362,7 +398,7 @@ public partial class App : Application
         var text = !string.IsNullOrEmpty(clip.Text) ? clip.Text : clip.Raw;
         if (string.IsNullOrEmpty(text) && !clip.IsRich) return;
 
-        if (!(clip.IsRich ? TrySetRichClipboardAndHide(clip) : TrySetClipboardAndHide(text))) return;
+        if (!TrySetClipboardForPaste(clip, text)) return;
         Task.Run(() => PasteService.Paste(150));
     }
 
